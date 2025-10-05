@@ -32,9 +32,10 @@ const db = new sqlite3.Database('./inventory.db', (err) => {
                 totalAmount REAL NOT NULL,
                 status TEXT NOT NULL DEFAULT 'pending',
                 paymentMethod TEXT, 
-                surchargePercentage REAL DEFAULT 0,
+                finalDiscount REAL DEFAULT 0,
                 finalAmount REAL,
-                appliedTax REAL DEFAULT 0
+                appliedTax REAL DEFAULT 0,
+                cancellationReason TEXT
             )`);
 
             // Tabla de Gastos
@@ -45,32 +46,22 @@ const db = new sqlite3.Database('./inventory.db', (err) => {
                 amount REAL NOT NULL
             )`);
 
-            // NUEVA Tabla para Métodos de Pago
+            // Tabla para Métodos de Pago
             db.run(`CREATE TABLE IF NOT EXISTS payment_methods (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL UNIQUE,
-                isFixed INTEGER NOT NULL DEFAULT 0 -- 1 para sí, 0 para no
+                isFixed INTEGER NOT NULL DEFAULT 0
             )`);
 
-            // NUEVA Tabla para Movimientos de Cuenta (Modificar Fondos)
+            // Tabla para Movimientos de Cuenta
             db.run(`CREATE TABLE IF NOT EXISTS account_movements (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 date TEXT NOT NULL,
-                type TEXT NOT NULL, -- 'deposit' o 'withdrawal'
+                type TEXT NOT NULL,
                 amount REAL NOT NULL,
                 reason TEXT NOT NULL
             )`);
 
-            // Insertar métodos de pago fijos si no existen
-            db.get("SELECT COUNT(*) as count FROM payment_methods WHERE isFixed = 1", (err, row) => {
-                if (row.count === 0) {
-                    const fixedMethods = ['Efectivo', 'Crédito', 'Débito', 'Cuenta DNI'];
-                    const stmt = db.prepare("INSERT INTO payment_methods (name, isFixed) VALUES (?, 1)");
-                    fixedMethods.forEach(method => stmt.run(method));
-                    stmt.finalize();
-                    console.log("Métodos de pago fijos insertados.");
-                }
-            });
         });
     }
 });

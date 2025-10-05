@@ -1,17 +1,20 @@
 import React, { useState, useMemo } from 'react';
 import useSalesStore from '../store/useSalesStore';
 import { FiX, FiPercent } from 'react-icons/fi';
+import { formatNumber } from '../utils/formatting';
 
 const ApplyTaxModal = ({ sale, onClose }) => {
-    const { applyTaxToSale, loading, error } = useSalesStore();
-    const [taxPercentage, setTaxPercentage] = useState(sale.taxPercentage || 0);
+    const { applyTax, loading, error } = useSalesStore();
+    const [taxPercentage, setTaxPercentage] = useState(0);
 
     const taxAmount = useMemo(() => (sale.finalAmount * taxPercentage) / 100, [sale.finalAmount, taxPercentage]);
     const netAmount = useMemo(() => sale.finalAmount - taxAmount, [sale.finalAmount, taxAmount]);
 
     const handleApplyTax = async () => {
-        const result = await applyTaxToSale(sale.id, { taxPercentage });
-        if (result.success) onClose();
+        const result = await applyTax(sale.id, taxPercentage);
+        if (result && result.success) {
+            onClose();
+        }
     };
 
     return (
@@ -23,20 +26,20 @@ const ApplyTaxModal = ({ sale, onClose }) => {
                 </div>
 
                 <div className="space-y-4">
-                    <div className="flex justify-between text-lg"><span>Total Cobrado:</span> <span>${sale.finalAmount.toFixed(2)}</span></div>
+                    <div className="flex justify-between text-lg"><span>Total Cobrado:</span> <span>${formatNumber(sale.finalAmount)}</span></div>
 
                     <div className="flex items-center gap-2">
                         <FiPercent />
                         <label>Impuesto a restar (%):</label>
                         <input type="number" value={taxPercentage} onChange={(e) => setTaxPercentage(Number(e.target.value))} className="w-20 p-1 border rounded text-right" min="0" max="100" />
                     </div>
-                    {taxPercentage > 0 && <div className="flex justify-between text-orange-500"><span>Monto Impuesto:</span> <span>-${taxAmount.toFixed(2)}</span></div>}
+                    {taxPercentage > 0 && <div className="flex justify-between text-orange-500"><span>Monto Impuesto:</span> <span>-${formatNumber(taxAmount)}</span></div>}
                 </div>
 
                 <div className="mt-6 pt-4 border-t">
                     <div className="flex justify-between items-center text-3xl font-bold text-green-600">
-                        <span>MONTO NETO:</span>
-                        <span>${netAmount.toFixed(2)}</span>
+                        <span>MONTO NETO (informativo):</span>
+                        <span>${formatNumber(netAmount)}</span>
                     </div>
                 </div>
 
@@ -45,7 +48,7 @@ const ApplyTaxModal = ({ sale, onClose }) => {
                 <div className="flex justify-end gap-4 mt-6">
                     <button onClick={onClose} disabled={loading} className="py-2 px-6 bg-gray-200 rounded hover:bg-gray-300">Cancelar</button>
                     <button onClick={handleApplyTax} disabled={loading} className="py-2 px-6 bg-orange-500 text-white rounded hover:bg-orange-600 disabled:bg-orange-300">
-                        {loading ? 'Aplicando...' : 'Aplicar Impuesto'}
+                        {loading ? 'Aplicando...' : 'Guardar Impuesto'}
                     </button>
                 </div>
             </div>

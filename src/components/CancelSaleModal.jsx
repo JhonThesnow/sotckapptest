@@ -12,7 +12,7 @@ const CancelSaleModal = ({ sale, onClose }) => {
             return;
         }
         const result = await cancelSale(sale.id, reason);
-        if (result && result.success) {
+        if (result.success) {
             onClose();
         }
     };
@@ -59,4 +59,3 @@ const CancelSaleModal = ({ sale, onClose }) => {
 };
 
 export default CancelSaleModal;
-

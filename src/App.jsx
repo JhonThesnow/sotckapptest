@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, NavLink, useLocation } from 'react-router-dom';
+import DashboardPage from './pages/DashboardPage';
 import InventoryPage from './pages/InventoryPage';
 import SalesPage from './pages/SalesPage';
 import VentasPage from './pages/VentasPage';
 import ReportsPage from './pages/ReportsPage';
-import AccountPage from './pages/AccountPage'; // 1. Importar la nueva página
-import { FiBox, FiTag, FiBarChart2, FiShoppingCart, FiMenu, FiUser } from 'react-icons/fi'; // 2. Añadir ícono
+import AccountPage from './pages/AccountPage';
+import { FiBox, FiTag, FiBarChart2, FiShoppingCart, FiMenu, FiUser, FiHome } from 'react-icons/fi';
 
 const Navigation = ({ onLinkClick }) => {
   const activeLinkStyle = {
@@ -17,13 +18,19 @@ const Navigation = ({ onLinkClick }) => {
       <div className="text-2xl font-bold mb-10 text-center">StockManager</div>
       <ul className="space-y-2">
         <li>
+          <NavLink to="/" style={({ isActive }) => isActive ? activeLinkStyle : undefined} onClick={onLinkClick} className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-700 transition-colors">
+            <FiHome />
+            <span>Principal</span>
+          </NavLink>
+        </li>
+        <li>
           <NavLink to="/cuenta" style={({ isActive }) => isActive ? activeLinkStyle : undefined} onClick={onLinkClick} className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-700 transition-colors">
             <FiUser />
             <span>Cuenta</span>
           </NavLink>
         </li>
         <li>
-          <NavLink to="/" style={({ isActive }) => isActive ? activeLinkStyle : undefined} onClick={onLinkClick} className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-700 transition-colors">
+          <NavLink to="/inventario" style={({ isActive }) => isActive ? activeLinkStyle : undefined} onClick={onLinkClick} className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-700 transition-colors">
             <FiBox />
             <span>Inventario</span>
           </NavLink>
@@ -71,9 +78,9 @@ const AppLayout = () => {
         </header>
         <main className="flex-1 overflow-y-auto">
           <Routes>
-            {/* 3. AÑADIR NUEVA RUTA */}
+            <Route path="/" element={<DashboardPage />} />
             <Route path="/cuenta" element={<AccountPage />} />
-            <Route path="/" element={<InventoryPage />} />
+            <Route path="/inventario" element={<InventoryPage />} />
             <Route path="/sales" element={<SalesPage />} />
             <Route path="/ventas" element={<VentasPage />} />
             <Route path="/reports" element={<ReportsPage />} />
@@ -99,4 +106,3 @@ const App = () => (
 );
 
 export default App;
-

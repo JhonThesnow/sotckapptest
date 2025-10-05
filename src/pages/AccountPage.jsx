@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import useAccountStore from '../store/useAccountStore';
 import { formatNumber } from '../utils/formatting';
-import { FiTrendingUp, FiTrendingDown, FiDollarSign, FiPlus, FiX, FiMoreHorizontal, FiFileText } from 'react-icons/fi';
+import { FiTrendingUp, FiTrendingDown, FiPlus, FiX, FiMoreHorizontal, FiFileText, FiSave, FiEdit, FiTrash } from 'react-icons/fi';
+import DatePicker from 'react-datepicker';
+import 'react-datepicker/dist/react-datepicker.css';
+import { startOfMonth, endOfMonth } from 'date-fns';
+import EditMovementModal from '../components/EditMovementModal';
 
-/**
- * Modal para agregar o retirar fondos de la cuenta.
- */
 const ModifyFundsModal = ({ onClose }) => {
     const { addMovement, loading } = useAccountStore();
     const [type, setType] = useState('deposit');
@@ -63,18 +64,43 @@ const ModifyFundsModal = ({ onClose }) => {
     );
 };
 
-/**
- * Página principal de la gestión de la cuenta.
- */
 const AccountPage = () => {
-    const { accountSummary, movements, fetchAccountSummary, fetchMovements, loading } = useAccountStore();
+    const { accountSummary, movements, loading, setDateRange, deleteMovement } = useAccountStore();
     const [showModal, setShowModal] = useState(false);
-    const [selectedMethod, setSelectedMethod] = useState(null); // Para mostrar detalles de ganancia
+    const [movementToEdit, setMovementToEdit] = useState(null);
+    const [selectedMethod, setSelectedMethod] = useState(null);
+
+    const [localStartDate, setLocalStartDate] = useState(startOfMonth(new Date()));
+    const [localEndDate, setLocalEndDate] = useState(endOfMonth(new Date()));
 
     useEffect(() => {
-        fetchAccountSummary();
-        fetchMovements();
-    }, []);
+        const savedStartDate = localStorage.getItem('defaultStartDate');
+        const savedEndDate = localStorage.getItem('defaultEndDate');
+        const startDate = savedStartDate ? new Date(savedStartDate) : startOfMonth(new Date());
+        const endDate = savedEndDate ? new Date(savedEndDate) : endOfMonth(new Date());
+
+        setLocalStartDate(startDate);
+        setLocalEndDate(endDate);
+        setDateRange(startDate, endDate);
+    }, [setDateRange]);
+
+    const handleDateChange = (start, end) => {
+        setLocalStartDate(start);
+        setLocalEndDate(end);
+        setDateRange(start, end);
+    };
+
+    const saveDateRangeAsDefault = () => {
+        localStorage.setItem('defaultStartDate', localStartDate.toISOString());
+        localStorage.setItem('defaultEndDate', localEndDate.toISOString());
+        alert('Rango de fechas guardado como predeterminado.');
+    };
+
+    const handleDeleteMovement = async (id) => {
+        if (window.confirm('¿Estás seguro de que quieres eliminar este movimiento?')) {
+            await deleteMovement(id);
+        }
+    };
 
     const formatDate = (dateString) => {
         const options = { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' };
@@ -84,6 +110,7 @@ const AccountPage = () => {
     return (
         <div className="p-4 md:p-6 bg-gray-50 min-h-full">
             {showModal && <ModifyFundsModal onClose={() => setShowModal(false)} />}
+            {movementToEdit && <EditMovementModal movement={movementToEdit} onClose={() => setMovementToEdit(null)} />}
 
             <div className="flex flex-col md:flex-row justify-between md:items-center mb-6 gap-4">
                 <h1 className="text-2xl md:text-3xl font-bold text-gray-800">Estado de Cuenta</h1>
@@ -93,15 +120,25 @@ const AccountPage = () => {
                 </button>
             </div>
 
-            {/* --- Tarjetas de Resumen --- */}
+            <div className="bg-white p-4 rounded-lg shadow mb-6 flex flex-col md:flex-row gap-4 items-center">
+                <div className="flex gap-4 items-center flex-grow">
+                    <DatePicker selected={localStartDate} onChange={date => handleDateChange(date, localEndDate)} dateFormat="dd/MM/yyyy" className="p-2 border rounded w-full" />
+                    <span>-</span>
+                    <DatePicker selected={localEndDate} onChange={date => handleDateChange(localStartDate, date)} dateFormat="dd/MM/yyyy" className="p-2 border rounded w-full" />
+                </div>
+                <button onClick={saveDateRangeAsDefault} className="flex items-center gap-2 bg-gray-200 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-300">
+                    <FiSave />
+                    <span>Guardar Rango</span>
+                </button>
+            </div>
+
+
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-                {/* Saldo Total */}
                 <div className="bg-white p-6 rounded-lg shadow-lg col-span-1 md:col-span-2 lg:col-span-3 border-l-4 border-blue-500">
                     <p className="text-gray-500 font-medium">Saldo Total en Cuenta</p>
                     <p className="text-4xl font-bold text-gray-800 mt-2">${formatNumber(accountSummary.totalBalance)}</p>
                 </div>
 
-                {/* Ingresos por Método de Pago */}
                 {Object.entries(accountSummary.incomeByMethod).map(([method, data]) => (
                     <div key={method} className="bg-white p-6 rounded-lg shadow relative cursor-pointer" onClick={() => setSelectedMethod(selectedMethod === method ? null : method)}>
                         <p className="text-gray-500 font-medium">{`Ingresos ${method}`}</p>
@@ -117,7 +154,6 @@ const AccountPage = () => {
                 ))}
             </div>
 
-            {/* --- Historial de Movimientos --- */}
             <div>
                 <h2 className="text-2xl font-bold text-gray-800 mb-4">Historial de Movimientos</h2>
                 <div className="bg-white rounded-lg shadow overflow-x-auto">
@@ -125,7 +161,7 @@ const AccountPage = () => {
                         movements.length > 0 ? (
                             <div className="divide-y divide-gray-200">
                                 {movements.map(mov => (
-                                    <div key={mov.id} className="p-4 flex flex-col sm:flex-row justify-between sm:items-center">
+                                    <div key={mov.id} className="p-4 flex flex-col sm:flex-row justify-between sm:items-center group">
                                         <div className="flex items-center gap-4">
                                             <div className={`p-3 rounded-full ${mov.type === 'deposit' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>
                                                 {mov.type === 'deposit' ? <FiTrendingUp /> : <FiTrendingDown />}
@@ -135,16 +171,22 @@ const AccountPage = () => {
                                                 <p className="text-sm text-gray-500">{formatDate(mov.date)}</p>
                                             </div>
                                         </div>
-                                        <p className={`font-bold text-lg mt-2 sm:mt-0 ${mov.type === 'deposit' ? 'text-green-600' : 'text-red-600'}`}>
-                                            {mov.type === 'deposit' ? '+' : '-'}${formatNumber(mov.amount)}
-                                        </p>
+                                        <div className="flex items-center gap-2 mt-2 sm:mt-0">
+                                            <p className={`font-bold text-lg ${mov.type === 'deposit' ? 'text-green-600' : 'text-red-600'}`}>
+                                                {mov.type === 'deposit' ? '+' : '-'}${formatNumber(mov.amount)}
+                                            </p>
+                                            <div className="opacity-0 group-hover:opacity-100 transition-opacity flex">
+                                                <button onClick={() => setMovementToEdit(mov)} title="Editar" className="p-2 text-gray-500 hover:text-blue-600"><FiEdit /></button>
+                                                <button onClick={() => handleDeleteMovement(mov.id)} title="Eliminar" className="p-2 text-gray-500 hover:text-red-600"><FiTrash /></button>
+                                            </div>
+                                        </div>
                                     </div>
                                 ))}
                             </div>
                         ) : (
                             <div className="text-center p-10 text-gray-500 flex flex-col items-center">
                                 <FiFileText size={32} className="mb-2" />
-                                <p>No hay movimientos de fondos registrados.</p>
+                                <p>No hay movimientos de fondos registrados para este rango de fechas.</p>
                             </div>
                         )}
                 </div>

@@ -1,11 +1,13 @@
 /**
- * Formatea un número al estilo argentino (ej: 1000 -> "1.000").
+ * Formatea un número al estilo argentino (ej: 1000 -> "1.000") sin decimales.
  * @param {number} number - El número a formatear.
  * @returns {string} El número formateado como texto.
  */
 export const formatNumber = (number) => {
     if (typeof number !== 'number' || isNaN(number)) return '0';
-    return new Intl.NumberFormat('es-AR').format(number);
+    return new Intl.NumberFormat('es-AR', {
+        maximumFractionDigits: 0
+    }).format(number);
 };
 
 /**
@@ -18,3 +20,4 @@ export const roundCash = (amount) => {
     if (typeof amount !== 'number' || isNaN(amount)) return 0;
     return Math.round(amount / 100) * 100;
 };
+

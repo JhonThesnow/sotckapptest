@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import ProductForm from '../components/ProductForm';
-import { FiPlusCircle, FiBox, FiEdit, FiTrash2, FiAlertCircle, FiChevronDown, FiChevronRight, FiDollarSign, FiTrendingUp, FiSearch } from 'react-icons/fi';
+import RestockModal from '../components/RestockModal';
+import { FiPlusCircle, FiBox, FiEdit, FiTrash2, FiChevronDown, FiChevronRight, FiDollarSign, FiTrendingUp, FiSearch, FiPlus } from 'react-icons/fi';
 import useProductStore from '../store/useProductStore';
+import { formatNumber } from '../utils/formatting';
 
 const ProductDetailView = ({ product }) => {
     if (!product) return null;
@@ -17,10 +19,10 @@ const ProductDetailView = ({ product }) => {
                         const profitMargin = product.purchasePrice > 0 ? (profit / product.purchasePrice) * 100 : Infinity;
                         return (
                             <div key={index} className="bg-white p-3 rounded-md shadow-sm border">
-                                <p className="font-semibold text-gray-700">{salePrice.name}: <span className="font-bold text-blue-600">${currentSalePrice.toFixed(2)}</span></p>
+                                <p className="font-semibold text-gray-700">{salePrice.name}: <span className="font-bold text-blue-600">${formatNumber(currentSalePrice)}</span></p>
                                 <div className={`flex items-center text-sm ${profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                                     <FiTrendingUp className="mr-1" />
-                                    <span>Ganancia: ${profit.toFixed(2)}</span>
+                                    <span>Ganancia: ${formatNumber(profit)}</span>
                                     <span className="ml-2 font-bold">({profitMargin === Infinity ? '∞' : profitMargin.toFixed(0)}%)</span>
                                 </div>
                             </div>
@@ -32,7 +34,7 @@ const ProductDetailView = ({ product }) => {
                         <p className="font-semibold text-gray-700">Precio de Compra</p>
                         <div className="flex items-center text-sm text-gray-600">
                             <FiDollarSign className="mr-1" />
-                            <span className="font-bold">${(product.purchasePrice ?? 0).toFixed(2)}</span>
+                            <span className="font-bold">${formatNumber(product.purchasePrice ?? 0)}</span>
                         </div>
                     </div>
                     <div className="bg-white p-3 rounded-md shadow-sm border">
@@ -48,10 +50,10 @@ const ProductDetailView = ({ product }) => {
     );
 };
 
-
 const InventoryPage = () => {
     const [showForm, setShowForm] = useState(false);
     const [productToEdit, setProductToEdit] = useState(null);
+    const [productToRestock, setProductToRestock] = useState(null);
     const [openSections, setOpenSections] = useState({});
     const [selectedProductId, setSelectedProductId] = useState(null);
     const [searchTerm, setSearchTerm] = useState('');
@@ -204,9 +206,9 @@ const InventoryPage = () => {
             </div>
 
             {showForm && <ProductForm productToEdit={productToEdit} onClose={handleCloseForm} />}
+            {productToRestock && <RestockModal product={productToRestock} onClose={() => setProductToRestock(null)} />}
 
             {loading && <div className="text-center py-10">Cargando productos...</div>}
-
             {error && <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg" role="alert"><p><strong className="font-bold">Error:</strong> {error}</p></div>}
 
             {!loading && !error && (
@@ -228,27 +230,34 @@ const InventoryPage = () => {
                                                 </button>
                                                 {openSections[`${brand}-${name}`] && (
                                                     <div className='pl-4 pb-2'>
-                                                        {groupedProducts[brand][name].map(product => (
-                                                            <div key={product.id}>
-                                                                <div className="flex items-center justify-between p-2 my-1 hover:bg-gray-100 rounded-md cursor-pointer" onClick={() => handleSelectProduct(product.id)}>
-                                                                    <div className="flex-1">
-                                                                        <p className="font-medium text-gray-800">{product.subtype || 'Producto base'}</p>
-                                                                        <p className="text-sm text-gray-500 flex items-center">
-                                                                            <span>Stock: {product.quantity}</span>
-                                                                            <span className="mx-2 text-gray-300">|</span>
-                                                                            <span className="font-semibold text-gray-700">
-                                                                                ${(product.salePrices[0]?.price ?? 0).toFixed(2)}
-                                                                            </span>
-                                                                        </p>
+                                                        {groupedProducts[brand][name].map(product => {
+                                                            const isLowStock = product.quantity <= product.lowStockThreshold;
+                                                            return (
+                                                                <div key={product.id}>
+                                                                    <div className={`flex items-center justify-between p-2 my-1 rounded-md cursor-pointer ${isLowStock ? 'bg-red-50 hover:bg-red-100' : 'hover:bg-gray-100'}`} onClick={() => handleSelectProduct(product.id)}>
+                                                                        <div className="flex-1 flex items-center">
+                                                                            {isLowStock && <div className="w-2 h-2 bg-red-500 rounded-full mr-3 flex-shrink-0" title="Bajo stock"></div>}
+                                                                            <div>
+                                                                                <p className="font-medium text-gray-800">{product.subtype || 'Producto base'}</p>
+                                                                                <p className="text-sm text-gray-500 flex items-center">
+                                                                                    <span>Stock: {product.quantity}</span>
+                                                                                    <span className="mx-2 text-gray-300">|</span>
+                                                                                    <span className="font-semibold text-gray-700">
+                                                                                        ${formatNumber(product.salePrices[0]?.price ?? 0)}
+                                                                                    </span>
+                                                                                </p>
+                                                                            </div>
+                                                                        </div>
+                                                                        <div className="flex items-center gap-1">
+                                                                            <button onClick={(e) => { e.stopPropagation(); setProductToRestock(product); }} className="p-2 text-green-600 hover:bg-green-100 rounded-full" title="Restock Rápido"><FiPlus size={16} /></button>
+                                                                            <button onClick={(e) => { e.stopPropagation(); handleEdit(product); }} className="p-2 text-yellow-600 hover:bg-yellow-100 rounded-full" title="Editar"><FiEdit size={16} /></button>
+                                                                            <button onClick={(e) => { e.stopPropagation(); handleDelete(product.id); }} className="p-2 text-red-600 hover:bg-red-100 rounded-full" title="Eliminar"><FiTrash2 size={16} /></button>
+                                                                        </div>
                                                                     </div>
-                                                                    <div className="flex items-center gap-2">
-                                                                        <button onClick={(e) => { e.stopPropagation(); handleEdit(product); }} className="p-2 text-yellow-600 hover:bg-yellow-100 rounded-full" title="Editar"><FiEdit size={16} /></button>
-                                                                        <button onClick={(e) => { e.stopPropagation(); handleDelete(product.id); }} className="p-2 text-red-600 hover:bg-red-100 rounded-full" title="Eliminar"><FiTrash2 size={16} /></button>
-                                                                    </div>
+                                                                    {selectedProductId === product.id && <ProductDetailView product={product} />}
                                                                 </div>
-                                                                {selectedProductId === product.id && <ProductDetailView product={product} />}
-                                                            </div>
-                                                        ))}
+                                                            )
+                                                        })}
                                                     </div>
                                                 )}
                                             </div>

@@ -8,8 +8,38 @@ const PORT = 3001;
 app.use(cors());
 app.use(express.json());
 
-// --- API Endpoints for PRODUCTS ---
+// --- Endpoint para el Dashboard ---
+app.get('/api/dashboard-summary', (req, res) => {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayEnd = new Date();
+    todayEnd.setHours(23, 59, 59, 999);
 
+    const salesSql = `SELECT finalAmount FROM sales WHERE status = 'completed' AND date >= ? AND date <= ?`;
+    const lowStockSql = `SELECT * FROM products WHERE quantity <= lowStockThreshold ORDER BY quantity ASC LIMIT 5`;
+    const recentMovementsSql = `SELECT * FROM account_movements ORDER BY date DESC LIMIT 5`;
+
+    Promise.all([
+        new Promise((resolve, reject) => db.all(salesSql, [todayStart.toISOString(), todayEnd.toISOString()], (err, rows) => err ? reject(err) : resolve(rows))),
+        new Promise((resolve, reject) => db.all(lowStockSql, [], (err, rows) => err ? reject(err) : resolve(rows))),
+        new Promise((resolve, reject) => db.all(recentMovementsSql, [], (err, rows) => err ? reject(err) : resolve(rows)))
+    ]).then(([salesToday, lowStockProducts, recentMovements]) => {
+        const totalRevenueToday = salesToday.reduce((sum, s) => sum + s.finalAmount, 0);
+        const salesCountToday = salesToday.length;
+
+        res.json({
+            data: {
+                totalRevenueToday,
+                salesCountToday,
+                lowStockProducts: lowStockProducts.map(p => ({ ...p, salePrices: JSON.parse(p.salePrices || '[]') })),
+                recentMovements
+            }
+        });
+    }).catch(err => res.status(500).json({ error: err.message }));
+});
+
+
+// --- Endpoints de PRODUCTOS ---
 app.get('/api/products', (req, res) => {
     const sql = "SELECT * FROM products ORDER BY brand, name";
     db.all(sql, [], (err, rows) => {
@@ -18,27 +48,17 @@ app.get('/api/products', (req, res) => {
         res.json({ "message": "success", "data": products });
     });
 });
+app.put('/api/products/:id/restock', (req, res) => {
+    const { id } = req.params;
+    const { quantity } = req.body;
+    if (!quantity || quantity <= 0) return res.status(400).json({ "error": "La cantidad debe ser un número positivo." });
 
-app.post('/api/products/batch', (req, res) => {
-    const products = req.body;
-    if (!Array.isArray(products) || products.length === 0) return res.status(400).json({ "error": "Se esperaba un array de productos." });
-    const sql = `INSERT INTO products (code, name, type, brand, subtype, quantity, purchasePrice, salePrices, lowStockThreshold) VALUES (?,?,?,?,?,?,?,?,?)`;
-    db.serialize(() => {
-        db.run('BEGIN TRANSACTION');
-        const promises = products.map(p => new Promise((resolve, reject) => {
-            const params = [p.code, p.name, p.type, p.brand, p.subtype, p.quantity, p.purchasePrice, JSON.stringify(p.salePrices), p.lowStockThreshold];
-            db.run(sql, params, function (err) { if (err) reject(err); else resolve({ id: this.lastID }); });
-        }));
-        Promise.all(promises).then(() => {
-            db.run('COMMIT');
-            res.status(201).json({ message: 'Productos creados exitosamente' });
-        }).catch(error => {
-            db.run('ROLLBACK');
-            res.status(500).json({ error: 'Falló la creación de productos por lote.', details: error.message });
-        });
+    const sql = `UPDATE products SET quantity = quantity + ? WHERE id = ?`;
+    db.run(sql, [quantity, id], function (err) {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ message: 'Stock actualizado' });
     });
 });
-
 app.put('/api/products/:id', (req, res) => {
     const { id } = req.params;
     const { code, name, type, brand, subtype, quantity, purchasePrice, salePrices, lowStockThreshold } = req.body;
@@ -49,7 +69,6 @@ app.put('/api/products/:id', (req, res) => {
         res.json({ "message": "success", "changes": this.changes });
     });
 });
-
 app.delete('/api/products/:id', (req, res) => {
     db.run('DELETE FROM products WHERE id = ?', req.params.id, function (err) {
         if (err) return res.status(400).json({ "error": err.message });
@@ -57,19 +76,7 @@ app.delete('/api/products/:id', (req, res) => {
     });
 });
 
-app.post('/api/products/:id/restock', (req, res) => {
-    const { amountToAdd } = req.body;
-    if (!amountToAdd || amountToAdd <= 0) return res.status(400).json({ "error": "La cantidad a agregar debe ser mayor a 0." });
-    const sql = `UPDATE products SET quantity = quantity + ? WHERE id = ?`;
-    db.run(sql, [amountToAdd, req.params.id], function (err) {
-        if (err) return res.status(400).json({ "error": err.message });
-        res.json({ "message": "restocked", "changes": this.changes });
-    });
-});
-
-
-// --- API Endpoints for SALES ---
-
+// --- Endpoints de VENTAS ---
 app.post('/api/sales', (req, res) => {
     const { items, subtotal, discount, totalAmount, paymentMethod } = req.body;
     if (!items || !Array.isArray(items) || items.length === 0) {
@@ -93,7 +100,7 @@ app.get('/api/sales', (req, res) => {
 
 app.put('/api/sales/:id/complete', (req, res) => {
     const { id } = req.params;
-    const { paymentMethod, finalDiscount } = req.body;
+    const { paymentMethod, finalDiscountPercentage } = req.body;
     db.serialize(() => {
         db.run('BEGIN TRANSACTION');
         db.get('SELECT * FROM sales WHERE id = ? AND status = "pending"', [id], (err, sale) => {
@@ -101,12 +108,13 @@ app.put('/api/sales/:id/complete', (req, res) => {
                 db.run('ROLLBACK');
                 return res.status(404).json({ error: 'Venta pendiente no encontrada' });
             }
-            const finalAmount = sale.totalAmount - (sale.totalAmount * ((finalDiscount || 0) / 100));
+            const finalAmount = sale.totalAmount - (sale.totalAmount * ((finalDiscountPercentage || 0) / 100));
             const items = JSON.parse(sale.items);
             const updateSaleSql = `UPDATE sales SET status = 'completed', paymentMethod = ?, finalDiscount = ?, finalAmount = ?, date = ? WHERE id = ?`;
-            db.run(updateSaleSql, [paymentMethod, (finalDiscount || 0), finalAmount, new Date().toISOString(), id], function (err) {
+            db.run(updateSaleSql, [paymentMethod, (finalDiscountPercentage || 0), finalAmount, new Date().toISOString(), id], function (err) {
                 if (err) { db.run('ROLLBACK'); return res.status(500).json({ error: 'Error al actualizar la venta', details: err.message }); }
                 const updatePromises = items.map(item => new Promise((resolve, reject) => {
+                    if (!item.productId) return resolve(); // Ignora items genéricos
                     const stockSql = `UPDATE products SET quantity = quantity - ? WHERE id = ? AND quantity >= ?`;
                     db.run(stockSql, [item.quantity, item.productId, item.quantity], function (err) {
                         if (err || this.changes === 0) return reject(new Error(`Stock insuficiente para el producto ID ${item.productId}`));
@@ -125,88 +133,124 @@ app.put('/api/sales/:id/complete', (req, res) => {
     });
 });
 
+
+app.post('/api/sales/history/:id/cancel', (req, res) => {
+    const { id } = req.params;
+    const { reason } = req.body;
+    if (!reason) {
+        return res.status(400).json({ error: "Se requiere un motivo de cancelación." });
+    }
+
+    db.serialize(() => {
+        db.run('BEGIN TRANSACTION');
+        db.get("SELECT * FROM sales WHERE id = ? AND status = 'completed'", [id], (err, sale) => {
+            if (err) { db.run('ROLLBACK'); return res.status(500).json({ error: err.message }); }
+            if (!sale) { db.run('ROLLBACK'); return res.status(404).json({ error: 'Venta no encontrada o no está completada.' }); }
+
+            const items = JSON.parse(sale.items);
+            const updateSaleSql = `UPDATE sales SET status = 'canceled', cancellationReason = ? WHERE id = ?`;
+
+            db.run(updateSaleSql, [reason, id], function (err) {
+                if (err) { db.run('ROLLBACK'); return res.status(500).json({ error: 'Error al actualizar el estado de la venta.' }); }
+
+                const movementReason = `Cancelación Venta #${id}: ${reason}`;
+                const addMovementSql = `INSERT INTO account_movements (date, type, amount, reason) VALUES (?, 'withdrawal', ?, ?)`;
+
+                db.run(addMovementSql, [new Date().toISOString(), sale.finalAmount, movementReason], (err) => {
+                    if (err) { db.run('ROLLBACK'); return res.status(500).json({ error: 'Error al registrar el movimiento en la cuenta.' }); }
+
+                    const stockPromises = items.map(item => new Promise((resolve, reject) => {
+                        if (!item.productId) return resolve(); // Ignora items genéricos
+                        const restockSql = `UPDATE products SET quantity = quantity + ? WHERE id = ?`;
+                        db.run(restockSql, [item.quantity, item.productId], (err) => {
+                            if (err) reject(err); else resolve();
+                        });
+                    }));
+
+                    Promise.all(stockPromises)
+                        .then(() => {
+                            db.run('COMMIT');
+                            res.json({ message: 'Venta cancelada, stock devuelto y movimiento registrado.' });
+                        })
+                        .catch((err) => {
+                            db.run('ROLLBACK');
+                            res.status(500).json({ error: 'Error al devolver el stock.', details: err.message });
+                        });
+                });
+            });
+        });
+    });
+});
+
+app.put('/api/sales/history/:id', (req, res) => {
+    const { id } = req.params;
+    const { finalAmount, paymentMethod } = req.body;
+    if (finalAmount === undefined || !paymentMethod) return res.status(400).json({ error: "Monto final y método de pago son requeridos." });
+    const sql = `UPDATE sales SET finalAmount = ?, paymentMethod = ? WHERE id = ? AND status = 'completed'`;
+    db.run(sql, [finalAmount, paymentMethod, id], function (err) {
+        if (err) return res.status(500).json({ error: err.message });
+        if (this.changes === 0) return res.status(404).json({ error: 'Venta completada no encontrada o sin cambios.' });
+        res.json({ message: 'Venta actualizada exitosamente' });
+    });
+});
+
 app.delete('/api/sales/pending/:id', (req, res) => {
     db.run(`DELETE FROM sales WHERE id = ? AND status = 'pending'`, req.params.id, function (err) {
         if (err) return res.status(500).json({ error: err.message });
-        res.json({ message: 'Venta pendiente eliminada', changes: this.changes });
+        res.json({ message: 'Venta pendiente eliminada' });
     });
 });
 
 app.delete('/api/sales/history/:id', (req, res) => {
-    db.run(`DELETE FROM sales WHERE id = ? AND status = 'completed'`, req.params.id, function (err) {
+    db.run(`DELETE FROM sales WHERE id = ? AND (status = 'completed' OR status = 'canceled')`, req.params.id, function (err) {
         if (err) return res.status(500).json({ error: err.message });
+        if (this.changes === 0) return res.status(404).json({ error: 'Venta no encontrada en el historial.' });
         res.json({ message: 'Venta del historial eliminada', changes: this.changes });
     });
 });
 
 app.put('/api/sales/history/:id/tax', (req, res) => {
-    const { taxAmount } = req.body;
-    db.run(`UPDATE sales SET tax = ? WHERE id = ?`, [taxAmount, req.params.id], function (err) {
+    const { id } = req.params;
+    const { taxPercentage } = req.body;
+    if (typeof taxPercentage !== 'number' || taxPercentage < 0 || taxPercentage > 100) return res.status(400).json({ error: "Porcentaje de impuesto inválido." });
+    db.get('SELECT finalAmount FROM sales WHERE id = ?', [id], (err, sale) => {
         if (err) return res.status(500).json({ error: err.message });
-        res.json({ message: 'Impuesto aplicado', changes: this.changes });
+        if (!sale) return res.status(404).json({ error: 'Venta no encontrada.' });
+        const taxAmount = (sale.finalAmount * taxPercentage) / 100;
+        db.run(`UPDATE sales SET appliedTax = ? WHERE id = ?`, [taxAmount, id], function (err) {
+            if (err) return res.status(500).json({ error: err.message });
+            res.json({ message: 'Impuesto aplicado' });
+        });
     });
 });
 
-// --- API Endpoints for EXPENSES ---
 
-app.post('/api/expenses', (req, res) => {
-    const { description, amount } = req.body;
-    if (!description || !amount || amount <= 0) return res.status(400).json({ "error": "Descripción y monto son requeridos." });
-    const sql = `INSERT INTO expenses (date, description, amount) VALUES (?, ?, ?)`;
-    db.run(sql, [new Date().toISOString(), description, amount], function (err) {
-        if (err) return res.status(400).json({ "error": err.message });
-        res.status(201).json({ "message": "success", "data": { id: this.lastID, ...req.body } });
-    });
-});
-
-app.get('/api/expenses', (req, res) => {
-    const sql = "SELECT * FROM expenses ORDER BY date DESC";
-    db.all(sql, [], (err, rows) => {
-        if (err) return res.status(500).json({ "error": err.message });
-        res.json({ "message": "success", "data": rows });
-    });
-});
-
-app.delete('/api/expenses/:id', (req, res) => {
-    db.run('DELETE FROM expenses WHERE id = ?', req.params.id, function (err) {
-        if (err) return res.status(400).json({ "error": err.message });
-        res.json({ "message": "deleted", "changes": this.changes });
-    });
-});
-
-// --- API Endpoints for REPORTS ---
-
+// --- Endpoints de REPORTES ---
 app.get('/api/reports/monthly-summary', (req, res) => {
     const { startDate, endDate } = req.query;
-    if (!startDate || !endDate) {
-        return res.status(400).json({ error: "startDate and endDate are required query parameters." });
-    }
-    const salesSql = `SELECT * FROM sales WHERE status = 'completed' AND date >= ? AND date <= ?`;
+    if (!startDate || !endDate) return res.status(400).json({ error: "startDate and endDate are required." });
+    const salesSql = `SELECT * FROM sales WHERE (status = 'completed' OR status = 'canceled') AND date >= ? AND date <= ?`;
     const expensesSql = `SELECT * FROM expenses WHERE date >= ? AND date <= ?`;
-
     Promise.all([
         new Promise((resolve, reject) => db.all(salesSql, [startDate, endDate], (err, rows) => err ? reject(err) : resolve(rows))),
         new Promise((resolve, reject) => db.all(expensesSql, [startDate, endDate], (err, rows) => err ? reject(err) : resolve(rows)))
     ]).then(([sales, expenses]) => {
+        const parsedSales = sales.map(s => ({ ...s, items: JSON.parse(s.items) }));
         let totalRevenue = 0;
         let totalProfit = 0;
-        sales.forEach(s => {
-            const saleItems = JSON.parse(s.items);
+        const completedSales = parsedSales.filter(s => s.status === 'completed');
+        completedSales.forEach(s => {
             totalRevenue += s.finalAmount;
-            saleItems.forEach(i => {
-                totalProfit += (i.unitPrice - i.purchasePrice) * i.quantity;
-            });
+            const costOfGoods = s.items.reduce((acc, i) => acc + (i.purchasePrice * i.quantity), 0);
+            totalProfit += s.finalAmount - costOfGoods;
         });
         const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
-        const netProfit = totalProfit - totalExpenses - sales.reduce((sum, s) => sum + (s.tax || 0), 0);
-
+        const totalTaxes = completedSales.reduce((sum, s) => sum + (s.appliedTax || 0), 0);
+        const netProfit = totalProfit - totalExpenses - totalTaxes;
         res.json({
             data: {
-                totalRevenue,
-                totalProfit,
-                totalExpenses,
-                netProfit,
-                sales,
+                totalRevenue, totalProfit, totalExpenses, netProfit,
+                sales: parsedSales,
                 expenses
             }
         });
@@ -214,56 +258,18 @@ app.get('/api/reports/monthly-summary', (req, res) => {
 });
 
 
-// --- API Endpoints for PAYMENT METHODS ---
-
-app.get('/api/payment-methods', (req, res) => {
-    db.all("SELECT * FROM payment_methods", [], (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json({ data: rows });
-    });
-});
-
-app.post('/api/payment-methods', (req, res) => {
-    const { name } = req.body;
-    db.run("INSERT INTO payment_methods (name) VALUES (?)", [name], function (err) {
-        if (err) return res.status(400).json({ error: err.message });
-        res.status(201).json({ id: this.lastID });
-    });
-});
-
-app.delete('/api/payment-methods/:id', (req, res) => {
-    db.run("DELETE FROM payment_methods WHERE id = ? AND is_fixed = 0", req.params.id, function (err) {
-        if (err) return res.status(400).json({ error: err.message });
-        res.json({ changes: this.changes });
-    });
-});
-
-// --- API Endpoints for ACCOUNT ---
-
-app.post('/api/account/movements', (req, res) => {
-    const { type, amount, reason } = req.body;
-    db.run("INSERT INTO account_movements (date, type, amount, reason) VALUES (?, ?, ?, ?)", [new Date().toISOString(), type, amount, reason], function (err) {
-        if (err) return res.status(400).json({ error: err.message });
-        res.status(201).json({ id: this.lastID });
-    });
-});
-
-app.get('/api/account/movements', (req, res) => {
-    db.all("SELECT * FROM account_movements ORDER BY date DESC", [], (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json({ data: rows });
-    });
-});
+// --- Endpoints de CUENTA ---
 
 app.get('/api/account/summary', (req, res) => {
-    const salesSql = "SELECT finalAmount, paymentMethod, items, tax FROM sales WHERE status = 'completed'";
-    const expensesSql = "SELECT amount FROM expenses";
-    const movementsSql = "SELECT type, amount FROM account_movements";
-
+    const { startDate, endDate } = req.query;
+    if (!startDate || !endDate) return res.status(400).json({ error: "Fechas de inicio y fin son requeridas." });
+    const salesSql = "SELECT finalAmount, paymentMethod, items, appliedTax FROM sales WHERE status = 'completed' AND date >= ? AND date <= ?";
+    const expensesSql = "SELECT amount FROM expenses WHERE date >= ? AND date <= ?";
+    const movementsSql = "SELECT type, amount FROM account_movements WHERE date >= ? AND date <= ?";
     Promise.all([
-        new Promise((resolve, reject) => db.all(salesSql, [], (err, rows) => err ? reject(err) : resolve(rows))),
-        new Promise((resolve, reject) => db.all(expensesSql, [], (err, rows) => err ? reject(err) : resolve(rows))),
-        new Promise((resolve, reject) => db.all(movementsSql, [], (err, rows) => err ? reject(err) : resolve(rows))),
+        new Promise((resolve, reject) => db.all(salesSql, [startDate, endDate], (err, rows) => err ? reject(err) : resolve(rows))),
+        new Promise((resolve, reject) => db.all(expensesSql, [startDate, endDate], (err, rows) => err ? reject(err) : resolve(rows))),
+        new Promise((resolve, reject) => db.all(movementsSql, [startDate, endDate], (err, rows) => err ? reject(err) : resolve(rows))),
     ]).then(([sales, expenses, movements]) => {
         const incomeByMethod = {};
         sales.forEach(s => {
@@ -273,29 +279,71 @@ app.get('/api/account/summary', (req, res) => {
             }
             incomeByMethod[s.paymentMethod].total += s.finalAmount;
             const saleItems = JSON.parse(s.items);
-            let saleProfit = 0;
-            saleItems.forEach(i => {
-                saleProfit += (i.unitPrice - i.purchasePrice) * i.quantity;
-            });
-            incomeByMethod[s.paymentMethod].profit += saleProfit;
-            incomeByMethod[s.paymentMethod].netProfit += saleProfit - (s.tax || 0);
-        });
+            const costOfGoodsSold = saleItems.reduce((acc, i) => acc + (i.purchasePrice * i.quantity), 0);
+            const saleGrossProfit = s.finalAmount - costOfGoodsSold;
 
+            incomeByMethod[s.paymentMethod].profit += saleGrossProfit;
+            incomeByMethod[s.paymentMethod].netProfit += saleGrossProfit - (s.appliedTax || 0);
+        });
         const totalIncome = sales.reduce((sum, s) => sum + s.finalAmount, 0);
+        const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
         const totalMovements = movements.reduce((sum, m) => sum + (m.type === 'deposit' ? m.amount : -m.amount), 0);
-
-        const totalBalance = totalIncome + totalMovements;
-
-        res.json({
-            data: {
-                totalBalance,
-                incomeByMethod,
-            }
-        });
+        const totalBalance = totalIncome + totalMovements - totalExpenses;
+        res.json({ data: { totalBalance, incomeByMethod } });
     }).catch(err => res.status(500).json({ error: err.message }));
 });
 
+app.delete('/api/account/movements/:id', (req, res) => {
+    db.run('DELETE FROM account_movements WHERE id = ?', req.params.id, function (err) {
+        if (err) return res.status(400).json({ "error": err.message });
+        if (this.changes === 0) return res.status(404).json({ error: 'Movimiento no encontrado.' });
+        res.json({ message: "Movimiento eliminado", changes: this.changes });
+    });
+});
 
+app.put('/api/account/movements/:id', (req, res) => {
+    const { id } = req.params;
+    const { amount, reason, type } = req.body;
+    if (!amount || !reason || !type) return res.status(400).json({ error: 'Faltan datos para actualizar.' });
+    const sql = `UPDATE account_movements SET amount = ?, reason = ?, type = ? WHERE id = ?`;
+    db.run(sql, [amount, reason, type, id], function (err) {
+        if (err) return res.status(400).json({ "error": err.message });
+        if (this.changes === 0) return res.status(404).json({ error: 'Movimiento no encontrado.' });
+        res.json({ message: "Movimiento actualizado", changes: this.changes });
+    });
+});
+
+
+// --- OTROS Endpoints ---
+app.post('/api/expenses', (req, res) => {
+    const { description, amount } = req.body;
+    if (!description || !amount || amount <= 0) return res.status(400).json({ "error": "Descripción y monto son requeridos." });
+    db.run(`INSERT INTO expenses (date, description, amount) VALUES (?, ?, ?)`, [new Date().toISOString(), description, amount], function (err) {
+        if (err) return res.status(400).json({ "error": err.message });
+        res.status(201).json({ "data": { id: this.lastID, ...req.body } });
+    });
+});
+app.get('/api/payment-methods', (req, res) => {
+    db.all("SELECT * FROM payment_methods", [], (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ data: rows });
+    });
+});
+app.post('/api/account/movements', (req, res) => {
+    const { type, amount, reason } = req.body;
+    db.run("INSERT INTO account_movements (date, type, amount, reason) VALUES (?, ?, ?, ?)", [new Date().toISOString(), type, amount, reason], function (err) {
+        if (err) return res.status(400).json({ error: err.message });
+        res.status(201).json({ id: this.lastID });
+    });
+});
+app.get('/api/account/movements', (req, res) => {
+    const { startDate, endDate } = req.query;
+    if (!startDate || !endDate) return res.status(400).json({ error: "Fechas de inicio y fin son requeridas." });
+    db.all("SELECT * FROM account_movements WHERE date >= ? AND date <= ? ORDER BY date DESC", [startDate, endDate], (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ data: rows });
+    });
+});
 app.listen(PORT, () => {
     console.log(`Servidor corriendo en http://localhost:${PORT}`);
 });

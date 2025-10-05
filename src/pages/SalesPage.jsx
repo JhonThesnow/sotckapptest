@@ -1,21 +1,23 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import useProductStore from '../store/useProductStore';
 import useSalesStore from '../store/useSalesStore';
-import { FiSearch, FiPlus, FiMinus, FiXCircle, FiShoppingCart, FiChevronLeft, FiChevronRight } from 'react-icons/fi';
+import { FiSearch, FiPlus, FiMinus, FiXCircle, FiShoppingCart, FiChevronLeft, FiChevronRight, FiCamera, FiPlusCircle } from 'react-icons/fi';
 import CheckoutModal from '../components/CheckoutModal';
+import BarcodeScannerModal from '../components/BarcodeScannerModal';
+import QuickSaleModal from '../components/QuickSaleModal';
 import { formatNumber } from '../utils/formatting';
 
 const SalesPage = () => {
     const [showCartOnMobile, setShowCartOnMobile] = useState(false);
     const [showCheckout, setShowCheckout] = useState(false);
+    const [showScanner, setShowScanner] = useState(false);
+    const [showQuickSale, setShowQuickSale] = useState(false);
 
-    // Estados para filtros y búsqueda
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedBrand, setSelectedBrand] = useState('Todas');
     const [selectedType, setSelectedType] = useState('Todos');
     const searchInputRef = useRef(null);
 
-    // Stores
     const { products, fetchProducts, loading: productsLoading } = useProductStore();
     const {
         cart,
@@ -32,8 +34,6 @@ const SalesPage = () => {
         fetchProducts();
         fetchPaymentMethods();
     }, [fetchProducts, fetchPaymentMethods]);
-
-    // --- LÓGICA DE FILTRADO (CON PROTECCIONES) ---
 
     const brands = useMemo(() => {
         if (!products) return ['Todas'];
@@ -61,16 +61,15 @@ const SalesPage = () => {
             tempProducts = tempProducts.filter(p => p.name === selectedType);
         }
         if (searchTerm.trim()) {
-            const searchWords = searchTerm.toLowerCase().split(' ').filter(word => word);
+            const lowercasedSearchTerm = searchTerm.toLowerCase();
             tempProducts = tempProducts.filter(product => {
-                const searchableString = `${product.brand || ''} ${product.name} ${product.subtype}`.toLowerCase();
-                return searchWords.every(word => searchableString.includes(word));
+                const searchableString = `${product.brand || ''} ${product.name} ${product.subtype} ${product.code || ''}`.toLowerCase();
+                return searchableString.includes(lowercasedSearchTerm);
             });
         }
         return tempProducts;
     }, [products, searchTerm, selectedBrand, selectedType]);
 
-    // --- CORRECCIÓN: Volvemos a añadir el cálculo del subtotal ---
     const cartSubtotal = useMemo(() => {
         return cart.reduce((total, item) => {
             const price = item.salePrices[0]?.price || 0;
@@ -80,44 +79,60 @@ const SalesPage = () => {
 
     const handleAddItem = (product) => {
         addItemToCart(product);
+        setSearchTerm(''); // Limpia la búsqueda después de agregar
         if (window.innerWidth > 768) {
             searchInputRef.current?.focus();
         }
     };
 
+    const onBarcodeDetected = (code) => {
+        setSearchTerm(code);
+        setShowScanner(false);
+    };
+
     return (
         <div className="flex flex-col md:grid md:grid-cols-3 md:gap-6 h-full p-4 md:p-6">
             {showCheckout && <CheckoutModal subtotal={cartSubtotal} preselectedPaymentMethod={currentPaymentMethod} onClose={() => setShowCheckout(false)} />}
+            {showScanner && <BarcodeScannerModal onDetected={onBarcodeDetected} onClose={() => setShowScanner(false)} />}
+            {showQuickSale && <QuickSaleModal onClose={() => setShowQuickSale(false)} />}
+
 
             <div className={`lg:col-span-2 bg-white p-4 rounded-lg shadow flex flex-col ${showCartOnMobile ? 'hidden' : 'flex'} md:flex`}>
-                <h2 className="text-2xl font-bold mb-4">Seleccionar Productos</h2>
-
+                <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-2xl font-bold">Seleccionar Productos</h2>
+                    <button onClick={() => setShowQuickSale(true)} className="flex items-center gap-2 text-sm bg-purple-100 text-purple-700 py-2 px-3 rounded-lg hover:bg-purple-200">
+                        <FiPlusCircle /> Venta Rápida
+                    </button>
+                </div>
                 <div className="mb-4 space-y-2">
                     <div className="relative">
                         <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                         <input
                             ref={searchInputRef}
                             type="text"
-                            placeholder="Buscar por nombre, línea, aroma..."
+                            placeholder="Buscar por nombre, código o escanear..."
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
-                            className="w-full pl-10 pr-4 py-3 border rounded-lg text-lg focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
-                            disabled={productsLoading} // Deshabilitado mientras carga
+                            className="w-full pl-10 pr-12 py-3 border rounded-lg text-lg focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
+                            disabled={productsLoading}
                         />
+                        <button onClick={() => setShowScanner(true)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-blue-600 p-1">
+                            <FiCamera size={24} />
+                        </button>
                     </div>
                     <div className="flex flex-col sm:flex-row gap-2">
                         <select
                             value={selectedBrand}
                             onChange={(e) => { setSelectedBrand(e.target.value); setSelectedType('Todos'); }}
                             className="p-2 border rounded bg-white w-full sm:flex-1 disabled:bg-gray-100"
-                            disabled={productsLoading} // Deshabilitado mientras carga
+                            disabled={productsLoading}
                         >
                             {(brands || []).map(brand => <option key={brand} value={brand}>{brand}</option>)}
                         </select>
                         <select
                             value={selectedType}
                             onChange={(e) => setSelectedType(e.target.value)}
-                            disabled={selectedBrand === 'Todas' || productsLoading} // Deshabilitado mientras carga
+                            disabled={selectedBrand === 'Todas' || productsLoading}
                             className="p-2 border rounded bg-white w-full sm:flex-1 disabled:bg-gray-100"
                         >
                             {(productTypes || []).map(type => <option key={type} value={type}>{type}</option>)}
@@ -160,7 +175,7 @@ const SalesPage = () => {
                     {cart.length > 0 ? cart.map(item => (
                         <div key={item.id} className="flex items-center gap-2 mb-4">
                             <div className="flex-grow">
-                                <p className="font-semibold text-sm">{item.name} - {item.subtype}</p>
+                                <p className="font-semibold text-sm">{item.name}{item.subtype ? ` - ${item.subtype}` : ''}</p>
                                 <p className="text-sm text-gray-600">${formatNumber(item.salePrices[0]?.price || 0)}</p>
                             </div>
                             <div className="flex items-center gap-1 border rounded-lg p-1">
@@ -205,4 +220,3 @@ const SalesPage = () => {
 };
 
 export default SalesPage;
-
