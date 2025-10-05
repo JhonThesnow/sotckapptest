@@ -48,13 +48,57 @@ app.get('/api/products', (req, res) => {
         res.json({ "message": "success", "data": products });
     });
 });
-app.put('/api/products/:id/restock', (req, res) => {
+
+app.post('/api/products/batch', (req, res) => {
+    const products = req.body;
+    if (!Array.isArray(products) || products.length === 0) {
+        return res.status(400).json({ "error": "Se requiere un array de productos." });
+    }
+
+    db.serialize(() => {
+        db.run('BEGIN TRANSACTION');
+        const sql = `INSERT INTO products (code, name, type, brand, subtype, quantity, purchasePrice, salePrices, lowStockThreshold) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+        const stmt = db.prepare(sql);
+
+        for (const product of products) {
+            const { code, name, type, brand, subtype, quantity, purchasePrice, salePrices, lowStockThreshold } = product;
+            stmt.run(
+                code || null,
+                name,
+                type,
+                brand || null,
+                subtype || null,
+                quantity,
+                purchasePrice,
+                JSON.stringify(salePrices),
+                lowStockThreshold || 10
+            );
+        }
+
+        stmt.finalize(err => {
+            if (err) {
+                db.run('ROLLBACK');
+                return res.status(500).json({ error: 'Error al finalizar la carga de productos', details: err.message });
+            }
+            db.run('COMMIT', (commitErr) => {
+                if (commitErr) {
+                    db.run('ROLLBACK');
+                    return res.status(500).json({ error: 'Error al confirmar la transacción', details: commitErr.message });
+                }
+                res.status(201).json({ "message": "Productos agregados exitosamente", "inserted": products.length });
+            });
+        });
+    });
+});
+
+
+app.post('/api/products/:id/restock', (req, res) => {
     const { id } = req.params;
-    const { quantity } = req.body;
-    if (!quantity || quantity <= 0) return res.status(400).json({ "error": "La cantidad debe ser un número positivo." });
+    const { amountToAdd } = req.body;
+    if (!amountToAdd || amountToAdd <= 0) return res.status(400).json({ "error": "La cantidad debe ser un número positivo." });
 
     const sql = `UPDATE products SET quantity = quantity + ? WHERE id = ?`;
-    db.run(sql, [quantity, id], function (err) {
+    db.run(sql, [amountToAdd, id], function (err) {
         if (err) return res.status(500).json({ error: err.message });
         res.json({ message: 'Stock actualizado' });
     });

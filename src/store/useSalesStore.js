@@ -327,7 +327,25 @@ const useSalesStore = create((set, get) => ({
             console.error("Error fetching payment methods:", e);
         }
     },
+
+    addPaymentMethod: async (name) => {
+        try {
+            const response = await fetch(`${API_URL}/payment-methods`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name }),
+            });
+            if (!response.ok) {
+                const err = await response.json();
+                throw new Error(err.error);
+            }
+            get().fetchPaymentMethods();
+            return { success: true };
+        } catch (e) {
+            alert(e.message);
+            return { success: false };
+        }
+    }
 }));
 
 export default useSalesStore;
-

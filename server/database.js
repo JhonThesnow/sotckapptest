@@ -62,9 +62,36 @@ const db = new sqlite3.Database('./inventory.db', (err) => {
                 reason TEXT NOT NULL
             )`);
 
+            // --- SEEDING DATA ---
+            // Insertar métodos de pago por defecto si no existen
+            const defaultMethods = ['Efectivo', 'Crédito', 'Débito', 'Cuenta DNI'];
+            const sql = `INSERT OR IGNORE INTO payment_methods (name, isFixed) VALUES (?, ?)`;
+
+            db.get("SELECT COUNT(*) as count FROM payment_methods", (err, row) => {
+                if (err) {
+                    console.error("Error checking payment methods:", err.message);
+                    return;
+                }
+                if (row.count === 0) {
+                    console.log("No payment methods found, seeding default ones.");
+                    db.serialize(() => {
+                        const stmt = db.prepare(sql);
+                        defaultMethods.forEach((method, index) => {
+                            // 'Efectivo' es fijo (isFixed = 1), los demás no.
+                            stmt.run(method, method === 'Efectivo' ? 1 : 0);
+                        });
+                        stmt.finalize((err) => {
+                            if (err) {
+                                console.error("Error seeding payment methods:", err.message);
+                            } else {
+                                console.log("Default payment methods seeded successfully.");
+                            }
+                        });
+                    });
+                }
+            });
         });
     }
 });
 
 module.exports = db;
-
