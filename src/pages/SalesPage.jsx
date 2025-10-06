@@ -86,8 +86,17 @@ const SalesPage = () => {
     };
 
     const onBarcodeDetected = (code) => {
-        setSearchTerm(code);
         setShowScanner(false);
+        const productFound = products.find(p => p.code && p.code.toLowerCase() === code.toLowerCase());
+        if (productFound) {
+            handleAddItem(productFound);
+        } else {
+            // Si no se encuentra, borra el campo de búsqueda como se solicitó.
+            setSearchTerm('');
+            if (window.innerWidth > 768) {
+                searchInputRef.current?.focus();
+            }
+        }
     };
 
     return (
@@ -220,3 +229,4 @@ const SalesPage = () => {
 };
 
 export default SalesPage;
+

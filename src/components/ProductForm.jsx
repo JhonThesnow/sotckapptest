@@ -1,8 +1,9 @@
 // src/components/ProductForm.jsx
 
 import React, { useState, useEffect } from 'react';
-import useProductStore from '../store/useProductStore';
-import { FiX, FiPlus, FiTrash, FiArrowLeft } from 'react-icons/fi';
+import useProductStore from '../store/useProductStore.js';
+import { FiX, FiPlus, FiTrash, FiArrowLeft, FiCamera } from 'react-icons/fi';
+import BarcodeScannerModal from './BarcodeScannerModal.jsx';
 
 const newVariation = {
     variationName: '',
@@ -10,6 +11,8 @@ const newVariation = {
     quantity: '',
     code: '',
     salePrices: [{ name: 'Minorista', price: '' }],
+    notifyLowStock: true,
+    lowStockThreshold: 10,
 };
 
 const ProductForm = ({ productToEdit, onClose }) => {
@@ -20,15 +23,37 @@ const ProductForm = ({ productToEdit, onClose }) => {
     const [template, setTemplate] = useState(null);
 
     const [commonData, setCommonData] = useState({});
-    const [variations, setVariations] = useState([newVariation]);
+    const [variations, setVariations] = useState([JSON.parse(JSON.stringify(newVariation))]);
 
     const [editData, setEditData] = useState(null);
+    const [notifyLowStock, setNotifyLowStock] = useState(true);
+
+    // State for barcode scanner
+    const [showScanner, setShowScanner] = useState(false);
+    const [scanningVariationIndex, setScanningVariationIndex] = useState(null);
 
     useEffect(() => {
         if (isEditMode) {
-            setEditData(productToEdit);
+            setEditData({
+                ...productToEdit,
+                lowStockThreshold: productToEdit.lowStockThreshold == null ? 10 : productToEdit.lowStockThreshold,
+            });
+            setNotifyLowStock(productToEdit.lowStockThreshold > 0);
         }
     }, [productToEdit, isEditMode]);
+
+    const handleBarcodeDetected = (scannedCode) => {
+        setShowScanner(false);
+        if (isEditMode) {
+            setEditData(prev => ({ ...prev, code: scannedCode }));
+        } else if (scanningVariationIndex !== null) {
+            const newVariations = [...variations];
+            newVariations[scanningVariationIndex].code = scannedCode;
+            setVariations(newVariations);
+            setScanningVariationIndex(null);
+        }
+    };
+
 
     const handleTemplateSelect = (selectedTemplate) => {
         setTemplate(selectedTemplate);
@@ -45,8 +70,21 @@ const ProductForm = ({ productToEdit, onClose }) => {
     };
 
     const handleVariationChange = (index, e) => {
+        const { name, value, type, checked } = e.target;
         const newVariations = [...variations];
-        newVariations[index][e.target.name] = e.target.value;
+        const targetVariation = newVariations[index];
+
+        if (type === 'checkbox') {
+            targetVariation[name] = checked;
+            if (name === 'notifyLowStock' && !checked) {
+                targetVariation.lowStockThreshold = 0;
+            } else if (name === 'notifyLowStock' && checked && (!targetVariation.lowStockThreshold || targetVariation.lowStockThreshold <= 0)) {
+                targetVariation.lowStockThreshold = 10;
+            }
+        } else {
+            targetVariation[name] = value;
+        }
+
         setVariations(newVariations);
     };
 
@@ -86,6 +124,16 @@ const ProductForm = ({ productToEdit, onClose }) => {
         setEditData(prev => ({ ...prev, [e.target.name]: e.target.value }));
     }
 
+    const handleNotifyLowStockChange = (e) => {
+        const isChecked = e.target.checked;
+        setNotifyLowStock(isChecked);
+        if (!isChecked) {
+            setEditData(prev => ({ ...prev, lowStockThreshold: 0 }));
+        } else {
+            setEditData(prev => ({ ...prev, lowStockThreshold: productToEdit.lowStockThreshold > 0 ? productToEdit.lowStockThreshold : 10 }));
+        }
+    };
+
     const handleEditPriceChange = (pIndex, e) => {
         const newPrices = [...editData.salePrices];
         newPrices[pIndex][e.target.name] = e.target.value;
@@ -109,6 +157,7 @@ const ProductForm = ({ productToEdit, onClose }) => {
                 purchasePrice: parseFloat(editData.purchasePrice),
                 quantity: parseInt(editData.quantity, 10),
                 salePrices: editData.salePrices.map(p => ({ ...p, price: parseFloat(p.price || 0) })),
+                lowStockThreshold: notifyLowStock ? parseInt(editData.lowStockThreshold, 10) : 0,
             };
             await updateProduct(finalEditData.id, finalEditData);
         } else {
@@ -125,7 +174,8 @@ const ProductForm = ({ productToEdit, onClose }) => {
                     brand: commonData.brand || null, name, subtype, type: commonData.type,
                     purchasePrice: parseFloat(v.purchasePrice),
                     quantity: parseInt(v.quantity, 10),
-                    code: v.code, lowStockThreshold: 10,
+                    code: v.code,
+                    lowStockThreshold: v.notifyLowStock ? parseInt(v.lowStockThreshold, 10) || 10 : 0,
                     salePrices: v.salePrices.map(p => ({ ...p, price: parseFloat(p.price || 0) })),
                 };
             });
@@ -138,6 +188,7 @@ const ProductForm = ({ productToEdit, onClose }) => {
         if (!editData) return null;
         return (
             <div className="fixed inset-0 bg-black bg-opacity-60 flex justify-center items-center z-50 p-4">
+                {showScanner && <BarcodeScannerModal onDetected={handleBarcodeDetected} onClose={() => setShowScanner(false)} />}
                 <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
                     <div className="flex justify-between items-center mb-4">
                         <h2 className="text-2xl font-bold">Editar Producto</h2>
@@ -149,16 +200,53 @@ const ProductForm = ({ productToEdit, onClose }) => {
                             <input name="name" value={editData.name} onChange={handleEditChange} placeholder="Nombre del Producto" className="p-2 border rounded" required />
                         </div>
                         <input name="subtype" value={editData.subtype} onChange={handleEditChange} placeholder="Subtipo / Variación" className="p-2 border rounded w-full" required />
+
+                        <div>
+                            <label htmlFor="code-edit" className="text-sm font-medium text-gray-700">Código (Opcional)</label>
+                            <div className="relative mt-1">
+                                <input
+                                    id="code-edit"
+                                    name="code"
+                                    value={editData.code || ''}
+                                    onChange={handleEditChange}
+                                    placeholder="Escanear o ingresar código de barras"
+                                    className="p-2 border rounded w-full pr-10"
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => setShowScanner(true)}
+                                    className="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-500 hover:text-blue-600"
+                                    aria-label="Escanear código de barras"
+                                >
+                                    <FiCamera size={20} />
+                                </button>
+                            </div>
+                        </div>
+
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <input type="number" name="purchasePrice" value={editData.purchasePrice} onChange={handleEditChange} placeholder="Precio de compra" className="p-2 border rounded" required />
+                            <input type="number" step="0.01" name="purchasePrice" value={editData.purchasePrice} onChange={handleEditChange} placeholder="Precio de compra" className="p-2 border rounded" required />
                             <input type="number" name="quantity" value={editData.quantity} onChange={handleEditChange} placeholder="Stock" className="p-2 border rounded" required />
                         </div>
+
+                        <div className="p-3 border rounded-lg bg-gray-50">
+                            <div className="flex items-center">
+                                <input id="notify-edit" type="checkbox" checked={notifyLowStock} onChange={handleNotifyLowStockChange} className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500" />
+                                <label htmlFor="notify-edit" className="ml-2 block text-sm font-medium text-gray-700">Notificar bajo stock</label>
+                            </div>
+                            {notifyLowStock && (
+                                <div className="mt-2">
+                                    <label htmlFor="threshold-edit" className="text-xs text-gray-600">Umbral de stock bajo</label>
+                                    <input id="threshold-edit" type="number" name="lowStockThreshold" value={editData.lowStockThreshold} onChange={handleEditChange} className="p-2 border rounded w-full mt-1" placeholder="Ej: 10" />
+                                </div>
+                            )}
+                        </div>
+
                         <div>
                             <h3 className="font-semibold mb-2">Precios de Venta</h3>
                             {editData.salePrices.map((p, index) => (
                                 <div key={index} className="flex items-center gap-2 mb-2">
                                     <input name="name" value={p.name} onChange={(e) => handleEditPriceChange(index, e)} placeholder="Nombre (ej: Minorista)" className="p-2 border rounded w-1/3" />
-                                    <input type="number" name="price" value={p.price || ''} onChange={(e) => handleEditPriceChange(index, e)} placeholder="Precio" className="p-2 border rounded w-1/3" />
+                                    <input type="number" step="0.01" name="price" value={p.price || ''} onChange={(e) => handleEditPriceChange(index, e)} placeholder="Precio" className="p-2 border rounded w-1/3" />
                                     {editData.salePrices.length > 1 && <button type="button" onClick={() => removePriceFromEdit(index)} className="text-red-500 p-2 rounded hover:bg-red-100"><FiTrash /></button>}
                                 </div>
                             ))}
@@ -204,6 +292,7 @@ const ProductForm = ({ productToEdit, onClose }) => {
     if (step === 2) {
         return (
             <div className="fixed inset-0 bg-black bg-opacity-60 flex justify-center items-center z-50 p-4">
+                {showScanner && <BarcodeScannerModal onDetected={handleBarcodeDetected} onClose={() => setShowScanner(false)} />}
                 <div className="bg-white p-4 sm:p-6 rounded-lg shadow-xl w-full max-w-6xl max-h-[90vh] flex flex-col">
                     <div className="flex justify-between items-center mb-4 border-b pb-3">
                         <div className="flex items-center gap-4">
@@ -229,7 +318,7 @@ const ProductForm = ({ productToEdit, onClose }) => {
                                     <div className="flex gap-2">
                                         <div className="flex-1">
                                             <label className="text-xs font-bold text-gray-600">P. Compra</label>
-                                            <input name="purchasePrice" type="number" placeholder="$" value={v.purchasePrice} onChange={e => handleVariationChange(vIndex, e)} className="p-2 border rounded w-full" required />
+                                            <input name="purchasePrice" type="number" step="0.01" placeholder="$" value={v.purchasePrice} onChange={e => handleVariationChange(vIndex, e)} className="p-2 border rounded w-full" required />
                                         </div>
                                         <div className="flex-1">
                                             <label className="text-xs font-bold text-gray-600">Stock</label>
@@ -238,16 +327,39 @@ const ProductForm = ({ productToEdit, onClose }) => {
                                     </div>
                                     <div className="flex-shrink-0">
                                         <label className="text-xs font-bold text-gray-600">Código</label>
-                                        <input name="code" placeholder="Opcional" value={v.code} onChange={e => handleVariationChange(vIndex, e)} className="p-2 border rounded w-full" />
+                                        <div className="relative flex items-center">
+                                            <input name="code" placeholder="Opcional" value={v.code || ''} onChange={e => handleVariationChange(vIndex, e)} className="p-2 border rounded w-full pr-10" />
+                                            <button
+                                                type="button"
+                                                onClick={() => { setScanningVariationIndex(vIndex); setShowScanner(true); }}
+                                                className="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-500 hover:text-blue-600"
+                                                aria-label="Escanear código de barras"
+                                            >
+                                                <FiCamera size={20} />
+                                            </button>
+                                        </div>
                                     </div>
                                     <button type="button" onClick={() => removeVariationRow(vIndex)} className="text-red-500 hover:bg-red-100 p-2 rounded-full self-center md:self-end"><FiTrash /></button>
                                 </div>
 
-                                <div className="pl-2 border-l-2 border-gray-200">
+                                <div className="mt-2 p-3 border rounded-lg bg-gray-50">
+                                    <div className="flex items-center">
+                                        <input id={`notify-${vIndex}`} type="checkbox" name="notifyLowStock" checked={v.notifyLowStock} onChange={(e) => handleVariationChange(vIndex, e)} className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500" />
+                                        <label htmlFor={`notify-${vIndex}`} className="ml-2 block text-sm font-medium text-gray-700">Notificar bajo stock</label>
+                                    </div>
+                                    {v.notifyLowStock && (
+                                        <div className="mt-2">
+                                            <label htmlFor={`threshold-${vIndex}`} className="text-xs text-gray-600">Umbral de stock bajo</label>
+                                            <input id={`threshold-${vIndex}`} type="number" name="lowStockThreshold" value={v.lowStockThreshold} onChange={(e) => handleVariationChange(vIndex, e)} className="p-2 border rounded w-full mt-1" placeholder="Ej: 10" />
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="pl-2 border-l-2 border-gray-200 mt-2">
                                     {v.salePrices.map((p, pIndex) => (
                                         <div key={pIndex} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 mb-2">
                                             <input name="name" value={p.name} onChange={e => handlePriceChange(vIndex, pIndex, e)} placeholder="Nombre de Precio" className="p-2 border rounded flex-1" />
-                                            <input name="price" type="number" value={p.price} onChange={e => handlePriceChange(vIndex, pIndex, e)} placeholder="Monto" className="p-2 border rounded flex-1" />
+                                            <input name="price" type="number" step="0.01" value={p.price} onChange={e => handlePriceChange(vIndex, pIndex, e)} placeholder="Monto" className="p-2 border rounded flex-1" />
                                             {v.salePrices.length > 1 && <button type="button" onClick={() => removePriceFromVariation(vIndex, pIndex)} className="text-red-500 hover:bg-red-100 p-2 rounded-full self-start sm:self-center"><FiTrash size={14} /></button>}
                                         </div>
                                     ))}
@@ -266,7 +378,8 @@ const ProductForm = ({ productToEdit, onClose }) => {
         );
     }
 
-    return null; // No debería llegar aquí, pero es un fallback seguro.
+    return null;
 };
 
 export default ProductForm;
+

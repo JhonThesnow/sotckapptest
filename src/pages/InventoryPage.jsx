@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import ProductForm from '../components/ProductForm';
-import RestockModal from '../components/RestockModal';
-import { FiPlusCircle, FiBox, FiEdit, FiTrash2, FiChevronDown, FiChevronRight, FiDollarSign, FiTrendingUp, FiSearch, FiPlus } from 'react-icons/fi';
-import useProductStore from '../store/useProductStore';
-import { formatNumber } from '../utils/formatting';
+import ProductForm from '../components/ProductForm.jsx';
+import RestockModal from '../components/RestockModal.jsx';
+import { FiPlusCircle, FiBox, FiEdit, FiTrash2, FiChevronDown, FiChevronRight, FiDollarSign, FiTrendingUp, FiSearch, FiPlus, FiCamera } from 'react-icons/fi';
+import useProductStore from '../store/useProductStore.js';
+import { formatNumber } from '../utils/formatting.js';
+import BarcodeScannerModal from '../components/BarcodeScannerModal.jsx';
 
 const ProductDetailView = ({ product }) => {
     if (!product) return null;
@@ -39,7 +40,7 @@ const ProductDetailView = ({ product }) => {
                     </div>
                     <div className="bg-white p-3 rounded-md shadow-sm border">
                         <p className="font-semibold text-gray-700">Stock Actual</p>
-                        <div className={`flex items-center text-sm font-bold ${product.quantity <= product.lowStockThreshold ? 'text-red-500' : 'text-gray-800'}`}>
+                        <div className={`flex items-center text-sm font-bold ${product.quantity <= product.lowStockThreshold && product.lowStockThreshold > 0 ? 'text-red-500' : 'text-gray-800'}`}>
                             <FiBox className="mr-1" />
                             <span>{product.quantity} unidades</span>
                         </div>
@@ -58,6 +59,7 @@ const InventoryPage = () => {
     const [selectedProductId, setSelectedProductId] = useState(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [activeFilters, setActiveFilters] = useState({ brand: '', name: '', sortBy: '' });
+    const [showScanner, setShowScanner] = useState(false);
 
     const { products, loading, error, fetchProducts, deleteProduct } = useProductStore();
 
@@ -74,7 +76,7 @@ const InventoryPage = () => {
         if (searchTerm.trim()) {
             const searchWords = searchTerm.toLowerCase().split(' ').filter(word => word);
             result = result.filter(product => {
-                const searchableString = `${product.brand || ''} ${product.name} ${product.subtype}`.toLowerCase();
+                const searchableString = `${product.brand || ''} ${product.name} ${product.subtype} ${product.code || ''}`.toLowerCase();
                 return searchWords.every(word => searchableString.includes(word));
             });
         }
@@ -166,6 +168,11 @@ const InventoryPage = () => {
         }
     };
 
+    const onBarcodeDetected = (code) => {
+        setShowScanner(false);
+        setSearchTerm(code);
+    };
+
     return (
         <div className="p-4 md:p-6 bg-gray-50 min-h-full">
             <div className="flex flex-col md:flex-row justify-between md:items-center mb-4 gap-4">
@@ -184,7 +191,13 @@ const InventoryPage = () => {
                     <div className="md:col-span-4">
                         <div className="relative">
                             <FiSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
-                            <input type="text" placeholder="Buscar por nombre, línea, aroma..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-12 pr-4 py-3 border rounded-lg text-base focus:ring-blue-500 focus:border-blue-500" />
+                            <input type="text" placeholder="Buscar por nombre, línea, aroma o código..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-12 pr-12 py-3 border rounded-lg text-base focus:ring-blue-500 focus:border-blue-500" />
+                            <button
+                                onClick={() => setShowScanner(true)}
+                                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-blue-600 p-1"
+                            >
+                                <FiCamera size={24} />
+                            </button>
                         </div>
                     </div>
                     <select name="brand" value={activeFilters.brand} onChange={handleFilterChange} className="w-full p-3 border rounded-lg bg-white">
@@ -205,6 +218,7 @@ const InventoryPage = () => {
                 </div>
             </div>
 
+            {showScanner && <BarcodeScannerModal onDetected={onBarcodeDetected} onClose={() => setShowScanner(false)} />}
             {showForm && <ProductForm productToEdit={productToEdit} onClose={handleCloseForm} />}
             {productToRestock && <RestockModal product={productToRestock} onClose={() => setProductToRestock(null)} />}
 
@@ -231,7 +245,7 @@ const InventoryPage = () => {
                                                 {openSections[`${brand}-${name}`] && (
                                                     <div className='pl-4 pb-2'>
                                                         {groupedProducts[brand][name].map(product => {
-                                                            const isLowStock = product.quantity <= product.lowStockThreshold;
+                                                            const isLowStock = product.quantity <= product.lowStockThreshold && product.lowStockThreshold > 0;
                                                             return (
                                                                 <div key={product.id}>
                                                                     <div className={`flex items-center justify-between p-2 my-1 rounded-md cursor-pointer ${isLowStock ? 'bg-red-50 hover:bg-red-100' : 'hover:bg-gray-100'}`} onClick={() => handleSelectProduct(product.id)}>

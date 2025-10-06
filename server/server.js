@@ -16,7 +16,7 @@ app.get('/api/dashboard-summary', (req, res) => {
     todayEnd.setHours(23, 59, 59, 999);
 
     const salesSql = `SELECT finalAmount FROM sales WHERE status = 'completed' AND date >= ? AND date <= ?`;
-    const lowStockSql = `SELECT * FROM products WHERE quantity <= lowStockThreshold ORDER BY quantity ASC LIMIT 5`;
+    const lowStockSql = `SELECT * FROM products WHERE quantity <= lowStockThreshold AND lowStockThreshold > 0 ORDER BY quantity ASC LIMIT 5`;
     const recentMovementsSql = `SELECT * FROM account_movements ORDER BY date DESC LIMIT 5`;
 
     Promise.all([
@@ -71,7 +71,7 @@ app.post('/api/products/batch', (req, res) => {
                 quantity,
                 purchasePrice,
                 JSON.stringify(salePrices),
-                lowStockThreshold || 10
+                lowStockThreshold
             );
         }
 
@@ -391,4 +391,3 @@ app.get('/api/account/movements', (req, res) => {
 app.listen(PORT, () => {
     console.log(`Servidor corriendo en http://localhost:${PORT}`);
 });
-
