@@ -684,23 +684,31 @@ app.get('/api/movement-categories', (req, res) => {
     });
 });
 
-
+// CORREGIDO Y MEJORADO
 app.get('/api/account/summary', (req, res) => {
     const { startDate, endDate, accountId } = req.query;
-    if (!startDate || !endDate) return res.status(400).json({ error: "Fechas de inicio y fin son requeridas." });
+    if (!startDate || !endDate) {
+        return res.status(400).json({ error: "Fechas de inicio y fin son requeridas." });
+    }
 
-    const whereClause = accountId ? `AND accountId = ${accountId}` : '';
+    const baseParams = [startDate, endDate];
+    let accountFilter = '';
+    let queryParams = [...baseParams];
 
-    const salesSql = `SELECT finalAmount FROM sales WHERE status = 'completed' AND date >= ? AND date <= ? ${whereClause}`;
-    const expensesSql = `SELECT amount FROM expenses WHERE date >= ? AND date <= ? ${whereClause}`;
-    const movementsSql = "SELECT type, amount FROM account_movements WHERE date >= ? AND date <= ? " + (accountId ? `AND accountId = ${accountId}` : '');
+    if (accountId) {
+        accountFilter = ' AND accountId = ?';
+        queryParams.push(accountId);
+    }
+
+    const salesSql = `SELECT finalAmount FROM sales WHERE status = 'completed' AND date >= ? AND date <= ? ${accountFilter}`;
+    const expensesSql = `SELECT amount FROM expenses WHERE date >= ? AND date <= ? ${accountFilter}`;
+    const movementsSql = `SELECT type, amount FROM account_movements WHERE date >= ? AND date <= ? ${accountFilter}`;
 
     Promise.all([
-        new Promise((resolve, reject) => db.all(salesSql, [startDate, endDate], (err, rows) => err ? reject(err) : resolve(rows))),
-        new Promise((resolve, reject) => db.all(expensesSql, [startDate, endDate], (err, rows) => err ? reject(err) : resolve(rows))),
-        new Promise((resolve, reject) => db.all(movementsSql, [startDate, endDate], (err, rows) => err ? reject(err) : resolve(rows))),
+        new Promise((resolve, reject) => db.all(salesSql, queryParams, (err, rows) => err ? reject(err) : resolve(rows))),
+        new Promise((resolve, reject) => db.all(expensesSql, queryParams, (err, rows) => err ? reject(err) : resolve(rows))),
+        new Promise((resolve, reject) => db.all(movementsSql, queryParams, (err, rows) => err ? reject(err) : resolve(rows))),
     ]).then(([sales, expenses, movements]) => {
-
         const totalSales = sales.reduce((sum, s) => sum + s.finalAmount, 0);
         const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
         const totalDeposits = movements.filter(m => m.type === 'deposit').reduce((sum, m) => sum + m.amount, 0);
@@ -719,7 +727,7 @@ app.get('/api/account/summary', (req, res) => {
     }).catch(err => res.status(500).json({ error: err.message }));
 });
 
-// NUEVO: Endpoint para Cierre de Caja
+
 app.get('/api/accounts/:id/cash-closing-data', (req, res) => {
     const { id } = req.params;
 
@@ -754,7 +762,6 @@ app.get('/api/accounts/:id/cash-closing-data', (req, res) => {
     });
 });
 
-// NUEVO: Endpoint para guardar un Cierre de Caja
 app.post('/api/cash-closings', (req, res) => {
     const { accountId, expected, counted, difference, notes } = req.body;
     const sql = `INSERT INTO cash_closings (accountId, date, expected, counted, difference, notes) VALUES (?, ?, ?, ?, ?, ?)`;
@@ -763,6 +770,31 @@ app.post('/api/cash-closings', (req, res) => {
     db.run(sql, params, function (err) {
         if (err) return res.status(500).json({ error: err.message });
         res.status(201).json({ message: "Cierre de caja guardado exitosamente", id: this.lastID });
+    });
+});
+
+app.get('/api/cash-closings', (req, res) => {
+    const { startDate, endDate, accountId } = req.query;
+    if (!startDate || !endDate) {
+        return res.status(400).json({ error: "Fechas de inicio y fin son requeridas." });
+    }
+
+    let sql = `
+        SELECT cc.*, a.name as accountName 
+        FROM cash_closings cc
+        JOIN accounts a ON a.id = cc.accountId
+        WHERE cc.date >= ? AND cc.date <= ?`;
+    let params = [startDate, endDate];
+
+    if (accountId) {
+        sql += " AND cc.accountId = ?";
+        params.push(accountId);
+    }
+    sql += " ORDER BY cc.date DESC";
+
+    db.all(sql, params, (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ data: rows });
     });
 });
 

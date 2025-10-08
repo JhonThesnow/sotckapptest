@@ -91,7 +91,20 @@ const db = new sqlite3.Database('./inventory.db', (err) => {
                 db.get("SELECT COUNT(*) as count FROM accounts", (err, row) => {
                     if (row.count === 0) {
                         console.log("Seeding Cuentas...");
-                        db.run(`INSERT INTO accounts (name, type) VALUES ('Caja Principal', 'Efectivo'), ('Banco', 'Digital')`);
+                        db.run(`INSERT INTO accounts (name, type) VALUES ('Caja Principal', 'Efectivo'), ('Banco', 'Digital')`, () => {
+                            // Una vez creadas las cuentas, podemos crear movimientos de ejemplo
+                            db.get("SELECT COUNT(*) as count FROM account_movements", (err, row) => {
+                                if (row.count === 0) {
+                                    console.log("Seeding Movimientos de ejemplo...");
+                                    const yesterday = new Date();
+                                    yesterday.setDate(yesterday.getDate() - 1);
+                                    db.run(`INSERT INTO account_movements (accountId, categoryId, date, type, amount, reason) VALUES 
+                                        (1, 1, '${new Date().toISOString()}', 'deposit', 5000, 'Aporte inicial para caja'),
+                                        (2, 7, '${yesterday.toISOString()}', 'withdrawal', 1200, 'Pago de sueldo')
+                                    `);
+                                }
+                            });
+                        });
                     }
                 });
 

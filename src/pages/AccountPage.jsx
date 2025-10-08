@@ -6,19 +6,21 @@ import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 import EditMovementModal from '../components/EditMovementModal';
 
-const ModifyFundsModal = ({ onClose }) => {
+const ModifyFundsModal = ({ onClose, accounts, selectedAccountId }) => {
     const { addMovement, loading, categories } = useAccountStore();
     const [type, setType] = useState('deposit');
     const [amount, setAmount] = useState('');
     const [reason, setReason] = useState('');
     const [categoryId, setCategoryId] = useState('');
+    const [modalAccountId, setModalAccountId] = useState(selectedAccountId || '');
 
     const filteredCategories = categories.filter(c => c.type === type);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        if (!amount || !reason || !categoryId) {
-            alert('Por favor, completa todos los campos.');
+        const targetAccountId = selectedAccountId || modalAccountId;
+        if (!amount || !reason || !categoryId || !targetAccountId) {
+            alert('Por favor, completa todos los campos, incluyendo la cuenta.');
             return;
         }
         const result = await addMovement({
@@ -26,6 +28,7 @@ const ModifyFundsModal = ({ onClose }) => {
             amount: parseFloat(amount),
             reason,
             categoryId: parseInt(categoryId, 10),
+            accountId: parseInt(targetAccountId, 10),
         });
         if (result.success) {
             onClose();
@@ -40,6 +43,15 @@ const ModifyFundsModal = ({ onClose }) => {
                     <button onClick={onClose}><FiX size={24} /></button>
                 </div>
                 <form onSubmit={handleSubmit} className="space-y-4">
+                    {!selectedAccountId && (
+                        <div>
+                            <label htmlFor="account" className="block text-sm font-medium text-gray-700">Cuenta</label>
+                            <select id="account" value={modalAccountId} onChange={(e) => setModalAccountId(e.target.value)} className="mt-1 p-2 border rounded w-full" required>
+                                <option value="">Selecciona una cuenta...</option>
+                                {accounts.map(acc => <option key={acc.id} value={acc.id}>{acc.name}</option>)}
+                            </select>
+                        </div>
+                    )}
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">Tipo de Movimiento</label>
                         <div className="flex gap-4">
@@ -191,7 +203,7 @@ const AccountPage = () => {
 
     return (
         <div className="p-4 md:p-6 bg-gray-50 min-h-full">
-            {showModifyFundsModal && <ModifyFundsModal onClose={() => setShowModifyFundsModal(false)} />}
+            {showModifyFundsModal && <ModifyFundsModal onClose={() => setShowModifyFundsModal(false)} accounts={accounts} selectedAccountId={selectedAccountId} />}
             {showCashClosingModal && <CashClosingModal onClose={() => setShowCashClosingModal(false)} />}
             {movementToEdit && <EditMovementModal movement={movementToEdit} onClose={() => setMovementToEdit(null)} />}
 
@@ -262,7 +274,7 @@ const AccountPage = () => {
 
                 {activeTab === 'movements' && (
                     <div className="bg-white rounded-lg shadow overflow-x-auto">
-                        {loading && movements.length === 0 ? <p className="p-4 text-center">Cargando...</p> :
+                        {loading ? <p className="p-4 text-center">Cargando...</p> :
                             movements.length > 0 ? (
                                 <div className="divide-y divide-gray-200">
                                     {movements.map(mov => (
@@ -299,7 +311,7 @@ const AccountPage = () => {
 
                 {activeTab === 'closings' && (
                     <div className="bg-white rounded-lg shadow overflow-x-auto">
-                        {loading && cashClosings.length === 0 ? <p className="p-4 text-center">Cargando...</p> :
+                        {loading ? <p className="p-4 text-center">Cargando...</p> :
                             cashClosings.length > 0 ? (
                                 <table className="w-full text-left">
                                     <thead className="bg-gray-100">

@@ -14,7 +14,7 @@ const useAccountStore = create((set, get) => ({
         periodResult: 0,
     },
     movements: [],
-    cashClosings: [], // NUEVO
+    cashClosings: [],
     balanceHistory: [],
     cashClosingData: null,
     loading: false,
@@ -24,6 +24,7 @@ const useAccountStore = create((set, get) => ({
 
     // --- ACCIONES ---
     fetchInitialData: async () => {
+        set({ loading: true });
         await get().fetchAccounts();
         await get().fetchCategories();
         const accounts = get().accounts;
@@ -32,6 +33,7 @@ const useAccountStore = create((set, get) => ({
         } else {
             get().fetchDataForCurrentState();
         }
+        set({ loading: false });
     },
 
     fetchAccounts: async () => {
@@ -64,69 +66,73 @@ const useAccountStore = create((set, get) => ({
         get().fetchDataForCurrentState();
     },
 
-    fetchDataForCurrentState: () => {
-        get().fetchAccountSummary();
-        get().fetchMovements();
-        get().fetchCashClosings(); // NUEVO
+    fetchDataForCurrentState: async () => {
+        set({ loading: true, error: null });
+        await Promise.all([
+            get().fetchAccountSummary(),
+            get().fetchMovements(),
+            get().fetchCashClosings()
+        ]);
+        set({ loading: false });
     },
 
     fetchAccountSummary: async () => {
         const { startDate, endDate, selectedAccountId } = get();
         if (!startDate || !endDate) return;
-        set({ loading: true, error: null });
         try {
-            const url = new URL(`${API_URL}/account/summary`);
-            url.searchParams.append('startDate', startDate.toISOString());
-            url.searchParams.append('endDate', endDate.toISOString());
+            const params = new URLSearchParams({
+                startDate: startDate.toISOString(),
+                endDate: endDate.toISOString(),
+            });
             if (selectedAccountId) {
-                url.searchParams.append('accountId', selectedAccountId);
+                params.append('accountId', selectedAccountId);
             }
-            const response = await fetch(url);
+            const response = await fetch(`${API_URL}/account/summary?${params.toString()}`);
             if (!response.ok) throw new Error('No se pudo obtener el resumen de la cuenta.');
             const json = await response.json();
-            set({ accountSummary: json.data, loading: false });
+            set({ accountSummary: json.data });
         } catch (e) {
-            set({ loading: false, error: e.message });
+            set({ error: e.message, accountSummary: { totalIncome: 0, totalOutcome: 0, periodResult: 0 } });
         }
     },
 
     fetchMovements: async () => {
         const { startDate, endDate, selectedAccountId } = get();
         if (!startDate || !endDate) return;
-        set({ loading: true, error: null });
         try {
-            const url = new URL(`${API_URL}/account/movements`);
-            url.searchParams.append('startDate', startDate.toISOString());
-            url.searchParams.append('endDate', endDate.toISOString());
+            const params = new URLSearchParams({
+                startDate: startDate.toISOString(),
+                endDate: endDate.toISOString(),
+            });
             if (selectedAccountId) {
-                url.searchParams.append('accountId', selectedAccountId);
+                params.append('accountId', selectedAccountId);
             }
-            const response = await fetch(url);
+            const response = await fetch(`${API_URL}/account/movements?${params.toString()}`);
             if (!response.ok) throw new Error('No se pudo obtener el historial de movimientos.');
             const json = await response.json();
-            set({ movements: json.data, loading: false });
+            set({ movements: json.data });
         } catch (e) {
-            set({ loading: false, error: e.message });
+            set({ error: e.message, movements: [] });
         }
     },
 
     fetchCashClosings: async () => {
         const { startDate, endDate, selectedAccountId } = get();
         if (!startDate || !endDate) return;
-        set({ loading: true, error: null });
         try {
-            const url = new URL(`${API_URL}/cash-closings`);
-            url.searchParams.append('startDate', startDate.toISOString());
-            url.searchParams.append('endDate', endDate.toISOString());
+            const params = new URLSearchParams({
+                startDate: startDate.toISOString(),
+                endDate: endDate.toISOString(),
+            });
             if (selectedAccountId) {
-                url.searchParams.append('accountId', selectedAccountId);
+                params.append('accountId', selectedAccountId);
             }
-            const response = await fetch(url);
+            const response = await fetch(`${API_URL}/cash-closings?${params.toString()}`);
             if (!response.ok) throw new Error('No se pudo obtener el historial de cierres.');
             const json = await response.json();
-            set({ cashClosings: json.data, loading: false });
+            set({ cashClosings: json.data });
         } catch (e) {
-            set({ loading: false, error: e.message });
+            set({ error: e.message, cashClosings: [] });
         }
     },
 
@@ -163,12 +169,16 @@ const useAccountStore = create((set, get) => ({
 
     addMovement: async (movementData) => {
         set({ loading: true, error: null });
-        const { selectedAccountId } = get();
+        if (!movementData.accountId) {
+            const error = "Se debe especificar una cuenta para el movimiento.";
+            set({ error });
+            return { success: false, error };
+        }
         try {
             const response = await fetch(`${API_URL}/account/movements`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ ...movementData, accountId: selectedAccountId }),
+                body: JSON.stringify(movementData),
             });
             const json = await response.json();
             if (!response.ok) throw new Error(json.error || 'No se pudo registrar el movimiento.');
