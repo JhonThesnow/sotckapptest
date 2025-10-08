@@ -4,6 +4,8 @@ const API_URL = '/api';
 
 const useProductStore = create((set, get) => ({
     products: [],
+    stockEntriesHistory: { entries: [], totalPages: 1 },
+    priceIncreaseHistory: { entries: [], totalPages: 1 },
     loading: false,
     error: null,
 
@@ -67,21 +69,94 @@ const useProductStore = create((set, get) => ({
         }
     },
 
-    restockProduct: async (id, amountToAdd) => {
+    batchRestock: async (productsToRestock) => {
         set({ loading: true, error: null });
         try {
-            const response = await fetch(`${API_URL}/products/${id}/restock`, {
+            const response = await fetch(`${API_URL}/products/batch-restock`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ amountToAdd }),
+                body: JSON.stringify({ products: productsToRestock }),
             });
-            if (!response.ok) throw new Error('Falló al hacer el restock.');
+            if (!response.ok) throw new Error('Falló el ingreso de stock por lote.');
             get().fetchProducts();
         } catch (e) {
             set({ loading: false, error: e.message });
         }
-    }
+    },
+
+    increasePrices: async (increaseData) => {
+        set({ loading: true, error: null });
+        try {
+            const response = await fetch(`${API_URL}/products/increase-prices`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(increaseData),
+            });
+            if (!response.ok) throw new Error('Falló al aumentar los precios.');
+            get().fetchProducts();
+        } catch (e) {
+            set({ loading: false, error: e.message });
+        }
+    },
+
+    fetchStockEntriesHistory: async (page, limit) => {
+        set({ loading: true, error: null });
+        try {
+            const response = await fetch(`${API_URL}/stock-entry-history?page=${page}&limit=${limit}`);
+            if (!response.ok) throw new Error('Falló al obtener el historial de ingresos.');
+            const json = await response.json();
+            set({ stockEntriesHistory: json, loading: false });
+        } catch (e) {
+            set({ loading: false, error: e.message });
+        }
+    },
+
+    fetchPriceIncreaseHistory: async (page, limit) => {
+        set({ loading: true, error: null });
+        try {
+            const response = await fetch(`${API_URL}/price-increase-history?page=${page}&limit=${limit}`);
+            if (!response.ok) throw new Error('Falló al obtener el historial de aumentos de precios.');
+            const json = await response.json();
+            set({ priceIncreaseHistory: json, loading: false });
+        } catch (e) {
+            set({ loading: false, error: e.message });
+        }
+    },
+
+    deleteStockEntry: async (id) => {
+        set({ loading: true, error: null });
+        try {
+            await fetch(`${API_URL}/stock-entry-history/${id}`, { method: 'DELETE' });
+            get().fetchStockEntriesHistory(1, 5); // Refresh
+        } catch (e) {
+            set({ loading: false, error: e.message });
+        }
+    },
+
+    updateStockEntry: async (id, originalProducts, updatedProducts) => {
+        set({ loading: true, error: null });
+        try {
+            await fetch(`${API_URL}/stock-entry-history/${id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ originalProducts, products: updatedProducts }),
+            });
+            get().fetchProducts();
+            get().fetchStockEntriesHistory(1, 5);
+        } catch (e) {
+            set({ loading: false, error: e.message });
+        }
+    },
+
+    deletePriceIncrease: async (id) => {
+        set({ loading: true, error: null });
+        try {
+            await fetch(`${API_URL}/price-increase-history/${id}`, { method: 'DELETE' });
+            get().fetchPriceIncreaseHistory(1, 5); // Refresh
+        } catch (e) {
+            set({ loading: false, error: e.message });
+        }
+    },
 }));
 
 export default useProductStore;
-

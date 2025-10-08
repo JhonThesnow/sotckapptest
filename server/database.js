@@ -62,6 +62,21 @@ const db = new sqlite3.Database('./inventory.db', (err) => {
                 reason TEXT NOT NULL
             )`);
 
+            // Tabla para Historial de Ingresos de Stock
+            db.run(`CREATE TABLE IF NOT EXISTS stock_entries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                products TEXT NOT NULL
+            )`);
+
+            // Tabla para Historial de Aumentos de Precios
+            db.run(`CREATE TABLE IF NOT EXISTS price_increases (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                details TEXT NOT NULL,
+                products TEXT NOT NULL
+            )`);
+
             // --- SEEDING DATA ---
             // Insertar métodos de pago por defecto si no existen
             const defaultMethods = ['Efectivo', 'Crédito', 'Débito', 'Cuenta DNI'];

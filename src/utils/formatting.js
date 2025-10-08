@@ -21,3 +21,12 @@ export const roundCash = (amount) => {
     return Math.round(amount / 100) * 100;
 };
 
+/**
+ * Formatea una fecha a `dd/MM/yyyy`.
+ * @param {string | Date} date - La fecha a formatear.
+ * @returns {string} La fecha formateada.
+ */
+export const formatDateOnly = (date) => {
+    if (!date) return '';
+    return new Date(date).toLocaleDateString('es-AR');
+};

@@ -120,6 +120,231 @@ app.delete('/api/products/:id', (req, res) => {
     });
 });
 
+
+// --- Nuevos Endpoints de INVENTARIO ---
+
+app.post('/api/products/batch-restock', (req, res) => {
+    const { products } = req.body; // Array de { id, amountToAdd, name, subtype }
+    if (!Array.isArray(products) || products.length === 0) {
+        return res.status(400).json({ error: "Se requiere un array de productos." });
+    }
+
+    db.serialize(() => {
+        db.run('BEGIN TRANSACTION');
+        const stockUpdateSql = `UPDATE products SET quantity = quantity + ? WHERE id = ?`;
+        const stmt = db.prepare(stockUpdateSql);
+
+        for (const product of products) {
+            stmt.run(product.amountToAdd, product.id);
+        }
+
+        stmt.finalize(err => {
+            if (err) {
+                db.run('ROLLBACK');
+                return res.status(500).json({ error: 'Error al actualizar el stock', details: err.message });
+            }
+
+            const historyProducts = products.map(p => ({ id: p.id, name: p.name, subtype: p.subtype, quantity: p.amountToAdd }));
+            const historySql = `INSERT INTO stock_entries (date, products) VALUES (?, ?)`;
+            db.run(historySql, [new Date().toISOString(), JSON.stringify(historyProducts)], function (err) {
+                if (err) {
+                    db.run('ROLLBACK');
+                    return res.status(500).json({ error: 'Error al registrar la entrada de stock', details: err.message });
+                }
+
+                db.run('COMMIT', (commitErr) => {
+                    if (commitErr) {
+                        db.run('ROLLBACK');
+                        return res.status(500).json({ error: 'Error al confirmar la transacción', details: commitErr.message });
+                    }
+                    res.status(200).json({ message: "Stock actualizado y registrado exitosamente." });
+                });
+            });
+        });
+    });
+});
+
+
+app.get('/api/stock-entry-history', (req, res) => {
+    const page = parseInt(req.query.page, 10) || 1;
+    const limit = parseInt(req.query.limit, 10) || 5;
+    const offset = (page - 1) * limit;
+
+    const dataSql = `SELECT * FROM stock_entries ORDER BY date DESC LIMIT ? OFFSET ?`;
+    const countSql = `SELECT COUNT(*) as count FROM stock_entries`;
+
+    Promise.all([
+        new Promise((resolve, reject) => db.all(dataSql, [limit, offset], (err, rows) => err ? reject(err) : resolve(rows))),
+        new Promise((resolve, reject) => db.get(countSql, (err, row) => err ? reject(err) : resolve(row.count)))
+    ]).then(([entries, total]) => {
+        res.json({
+            entries,
+            totalPages: Math.ceil(total / limit)
+        });
+    }).catch(err => res.status(500).json({ error: err.message }));
+});
+
+app.post('/api/products/increase-prices', (req, res) => {
+    const { products, type, value, targets } = req.body;
+    const productIds = products.map(p => p.id);
+
+    db.serialize(() => {
+        db.run('BEGIN TRANSACTION');
+
+        const productsForHistory = [];
+        const updatePromises = products.map(originalProduct => {
+            return new Promise((resolve, reject) => {
+                let { purchasePrice, salePrices } = originalProduct;
+
+                const oldPurchasePrice = purchasePrice;
+                const oldRetailPrice = salePrices[0].price;
+
+                let newPurchasePrice = oldPurchasePrice;
+                let newRetailPrice = oldRetailPrice;
+
+                if (targets.purchase) {
+                    newPurchasePrice = type === 'percentage'
+                        ? oldPurchasePrice * (1 + value / 100)
+                        : oldPurchasePrice + value;
+                }
+                if (targets.retail) {
+                    newRetailPrice = type === 'percentage'
+                        ? oldRetailPrice * (1 + value / 100)
+                        : oldRetailPrice + value;
+                }
+
+                const newSalePrices = [{ ...salePrices[0], price: newRetailPrice }];
+
+                db.run('UPDATE products SET purchasePrice = ?, salePrices = ? WHERE id = ?', [newPurchasePrice, JSON.stringify(newSalePrices), originalProduct.id], function (err) {
+                    if (err) return reject(err);
+
+                    productsForHistory.push({
+                        id: originalProduct.id,
+                        name: originalProduct.name,
+                        subtype: originalProduct.subtype,
+                        oldPurchasePrice: oldPurchasePrice.toFixed(2),
+                        newPurchasePrice: newPurchasePrice.toFixed(2),
+                        oldRetailPrice: oldRetailPrice.toFixed(2),
+                        newRetailPrice: newRetailPrice.toFixed(2),
+                    });
+                    resolve();
+                });
+            });
+        });
+
+        Promise.all(updatePromises).then(() => {
+            const historySql = `INSERT INTO price_increases (date, details, products) VALUES (?, ?, ?)`;
+            const details = JSON.stringify({ type, value, targets });
+
+            db.run(historySql, [new Date().toISOString(), details, JSON.stringify(productsForHistory)], (err) => {
+                if (err) {
+                    db.run('ROLLBACK');
+                    return res.status(500).json({ error: 'Error al registrar el aumento de precios' });
+                }
+
+                db.run('COMMIT', (commitErr) => {
+                    if (commitErr) {
+                        db.run('ROLLBACK');
+                        return res.status(500).json({ error: 'Error al confirmar la transacción' });
+                    }
+                    res.status(200).json({ message: 'Precios actualizados y registrados' });
+                });
+            });
+        }).catch(err => {
+            db.run('ROLLBACK');
+            res.status(500).json({ error: 'Error al actualizar productos', details: err.message });
+        });
+    });
+});
+
+
+app.get('/api/price-increase-history', (req, res) => {
+    const page = parseInt(req.query.page, 10) || 1;
+    const limit = parseInt(req.query.limit, 10) || 5;
+    const offset = (page - 1) * limit;
+
+    const dataSql = `SELECT * FROM price_increases ORDER BY date DESC LIMIT ? OFFSET ?`;
+    const countSql = `SELECT COUNT(*) as count FROM price_increases`;
+
+    Promise.all([
+        new Promise((resolve, reject) => db.all(dataSql, [limit, offset], (err, rows) => err ? reject(err) : resolve(rows))),
+        new Promise((resolve, reject) => db.get(countSql, (err, row) => err ? reject(err) : resolve(row.count)))
+    ]).then(([entries, total]) => {
+        res.json({
+            entries,
+            totalPages: Math.ceil(total / limit)
+        });
+    }).catch(err => res.status(500).json({ error: err.message }));
+});
+
+app.delete('/api/stock-entry-history/:id', (req, res) => {
+    const { id } = req.params;
+    db.run('DELETE FROM stock_entries WHERE id = ?', [id], function (err) {
+        if (err) return res.status(500).json({ error: err.message });
+        res.status(200).json({ message: 'Entrada de historial eliminada.' });
+    });
+});
+
+app.delete('/api/price-increase-history/:id', (req, res) => {
+    const { id } = req.params;
+    db.run('DELETE FROM price_increases WHERE id = ?', [id], function (err) {
+        if (err) return res.status(500).json({ error: err.message });
+        res.status(200).json({ message: 'Aumento de historial eliminado.' });
+    });
+});
+
+app.put('/api/stock-entry-history/:id', (req, res) => {
+    const { id } = req.params;
+    const { products: updatedProducts, originalProducts } = req.body;
+
+    db.serialize(() => {
+        db.run('BEGIN TRANSACTION');
+
+        const reversalPromises = originalProducts.map(p => {
+            return new Promise((resolve, reject) => {
+                db.run('UPDATE products SET quantity = quantity - ? WHERE id = ?', [p.quantity, p.id], err => {
+                    if (err) reject(err);
+                    else resolve();
+                });
+            });
+        });
+
+        Promise.all(reversalPromises).then(() => {
+            const applicationPromises = updatedProducts.map(p => {
+                return new Promise((resolve, reject) => {
+                    db.run('UPDATE products SET quantity = quantity + ? WHERE id = ?', [p.quantity, p.id], err => {
+                        if (err) reject(err);
+                        else resolve();
+                    });
+                });
+            });
+
+            Promise.all(applicationPromises).then(() => {
+                db.run('UPDATE stock_entries SET products = ? WHERE id = ?', [JSON.stringify(updatedProducts), id], err => {
+                    if (err) {
+                        db.run('ROLLBACK');
+                        return res.status(500).json({ error: "Error al actualizar el historial" });
+                    }
+                    db.run('COMMIT', commitErr => {
+                        if (commitErr) {
+                            db.run('ROLLBACK');
+                            return res.status(500).json({ error: "Error al confirmar la transacción" });
+                        }
+                        res.status(200).json({ message: "Ingreso de stock actualizado" });
+                    });
+                });
+            }).catch(err => {
+                db.run('ROLLBACK');
+                res.status(500).json({ error: 'Error al aplicar el nuevo stock', details: err.message });
+            });
+        }).catch(err => {
+            db.run('ROLLBACK');
+            res.status(500).json({ error: 'Error al revertir el stock original', details: err.message });
+        });
+    });
+});
+
+
 // --- Endpoints de VENTAS ---
 app.post('/api/sales', (req, res) => {
     const { items, subtotal, discount, totalAmount, paymentMethod } = req.body;
@@ -299,6 +524,84 @@ app.get('/api/reports/monthly-summary', (req, res) => {
             }
         });
     }).catch(err => res.status(500).json({ error: err.message }));
+});
+
+app.post('/api/sales-report-data', (req, res) => {
+    const { startDate, endDate, types = [], brands = [] } = req.body;
+
+    let salesQuery = `
+        SELECT s.date, s.finalAmount, s.items
+        FROM sales s
+        JOIN (
+            SELECT DISTINCT sales_items.sale_id
+            FROM (
+                SELECT s.id AS sale_id, json_extract(item.value, '$.productId') AS product_id
+                FROM sales s, json_each(s.items) AS item
+            ) AS sales_items
+            LEFT JOIN products p ON p.id = sales_items.product_id
+            WHERE 1=1
+            ${types.length > 0 ? `AND p.type IN (${types.map(() => '?').join(',')})` : ''}
+            ${brands.length > 0 ? `AND p.brand IN (${brands.map(() => '?').join(',')})` : ''}
+        ) AS filtered_sales ON s.id = filtered_sales.sale_id
+        WHERE s.status = 'completed' AND s.date >= ? AND s.date <= ?
+    `;
+
+    const params = [...types, ...brands, startDate, endDate];
+
+    db.all(salesQuery, params, (err, sales) => {
+        if (err) {
+            return res.status(500).json({ error: "Database error", details: err.message });
+        }
+
+        let totalRevenue = 0;
+        let totalProductsSold = 0;
+        const salesByDay = {};
+        const productCounts = {};
+
+        sales.forEach(sale => {
+            const saleDate = sale.date.split('T')[0];
+            totalRevenue += sale.finalAmount;
+
+            if (!salesByDay[saleDate]) {
+                salesByDay[saleDate] = { sales: 0, items: 0 };
+            }
+            salesByDay[saleDate].sales += sale.finalAmount;
+
+            const items = JSON.parse(sale.items);
+            items.forEach(item => {
+                totalProductsSold += item.quantity;
+                salesByDay[saleDate].items += item.quantity;
+
+                if (productCounts[item.fullName]) {
+                    productCounts[item.fullName] += item.quantity;
+                } else {
+                    productCounts[item.fullName] = item.quantity;
+                }
+            });
+        });
+
+        const topProducts = Object.entries(productCounts)
+            .map(([name, quantity]) => ({ name, quantity }))
+            .sort((a, b) => b.quantity - a.quantity)
+            .slice(0, 10);
+
+        const totalSalesInTop = topProducts.reduce((sum, p) => sum + p.quantity, 0);
+        const topProductsWithPercentage = topProducts.map(p => ({
+            ...p,
+            percentage: totalSalesInTop > 0 ? ((p.quantity / totalSalesInTop) * 100).toFixed(2) : 0,
+        }));
+
+
+        res.json({
+            summary: {
+                totalRevenue,
+                totalProductsSold,
+                totalSales: sales.length,
+            },
+            salesByDay,
+            topProducts: topProductsWithPercentage,
+        });
+    });
 });
 
 

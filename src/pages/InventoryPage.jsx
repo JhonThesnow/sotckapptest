@@ -5,6 +5,8 @@ import { FiPlusCircle, FiBox, FiEdit, FiTrash2, FiChevronDown, FiChevronRight, F
 import useProductStore from '../store/useProductStore.js';
 import { formatNumber } from '../utils/formatting.js';
 import BarcodeScannerModal from '../components/BarcodeScannerModal.jsx';
+import StockIncome from '../components/StockIncome.jsx';
+import PriceIncreases from '../components/PriceIncreases.jsx';
 
 const ProductDetailView = ({ product }) => {
     if (!product) return null;
@@ -52,6 +54,7 @@ const ProductDetailView = ({ product }) => {
 };
 
 const InventoryPage = () => {
+    const [activeTab, setActiveTab] = useState('inventory');
     const [showForm, setShowForm] = useState(false);
     const [productToEdit, setProductToEdit] = useState(null);
     const [productToRestock, setProductToRestock] = useState(null);
@@ -186,111 +189,123 @@ const InventoryPage = () => {
                 </button>
             </div>
 
-            <div className="mb-6 bg-white p-4 rounded-lg shadow-sm">
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                    <div className="md:col-span-4">
-                        <div className="relative">
-                            <FiSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
-                            <input type="text" placeholder="Buscar por nombre, línea, aroma o código..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-12 pr-12 py-3 border rounded-lg text-base focus:ring-blue-500 focus:border-blue-500" />
-                            <button
-                                onClick={() => setShowScanner(true)}
-                                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-blue-600 p-1"
-                            >
-                                <FiCamera size={24} />
-                            </button>
-                        </div>
-                    </div>
-                    <select name="brand" value={activeFilters.brand} onChange={handleFilterChange} className="w-full p-3 border rounded-lg bg-white">
-                        <option value="">Todas las Marcas</option>
-                        {uniqueBrands.map(brand => <option key={brand} value={brand}>{brand}</option>)}
-                    </select>
-                    <select name="name" value={activeFilters.name} onChange={handleFilterChange} className="w-full p-3 border rounded-lg bg-white">
-                        <option value="">Todos los Tipos</option>
-                        {uniqueNames.map(name => <option key={name} value={name}>{name}</option>)}
-                    </select>
-                    <select name="sortBy" value={activeFilters.sortBy} onChange={handleFilterChange} className="w-full p-3 border rounded-lg bg-white col-span-1 md:col-span-2">
-                        <option value="">Ordenar por...</option>
-                        <option value="stock_asc">Stock (Menor a Mayor)</option>
-                        <option value="stock_desc">Stock (Mayor a Menor)</option>
-                        <option value="price_asc">Precio (Menor a Mayor)</option>
-                        <option value="price_desc">Precio (Mayor a Menor)</option>
-                    </select>
-                </div>
+            <div className="flex border-b mb-6">
+                <button onClick={() => setActiveTab('inventory')} className={`py-2 px-4 ${activeTab === 'inventory' ? 'border-b-2 border-blue-600 font-semibold text-blue-600' : 'text-gray-500'}`}>Inventario</button>
+                <button onClick={() => setActiveTab('stockIncome')} className={`py-2 px-4 ${activeTab === 'stockIncome' ? 'border-b-2 border-blue-600 font-semibold text-blue-600' : 'text-gray-500'}`}>Ingresos Stock</button>
+                <button onClick={() => setActiveTab('priceIncreases')} className={`py-2 px-4 ${activeTab === 'priceIncreases' ? 'border-b-2 border-blue-600 font-semibold text-blue-600' : 'text-gray-500'}`}>Aumentos</button>
             </div>
 
-            {showScanner && <BarcodeScannerModal onDetected={onBarcodeDetected} onClose={() => setShowScanner(false)} />}
-            {showForm && <ProductForm productToEdit={productToEdit} onClose={handleCloseForm} />}
-            {productToRestock && <RestockModal product={productToRestock} onClose={() => setProductToRestock(null)} />}
-
-            {loading && <div className="text-center py-10">Cargando productos...</div>}
-            {error && <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg" role="alert"><p><strong className="font-bold">Error:</strong> {error}</p></div>}
-
-            {!loading && !error && (
-                <div className="space-y-2">
-                    {Object.keys(groupedProducts).length > 0 ? (
-                        Object.keys(groupedProducts).map(brand => (
-                            <div key={brand} className="bg-white rounded-lg shadow-sm">
-                                <button onClick={() => toggleSection(brand)} className="w-full flex justify-between items-center p-4 font-bold text-lg text-left">
-                                    <span>{brand}</span>
-                                    {openSections[brand] ? <FiChevronDown /> : <FiChevronRight />}
-                                </button>
-                                {openSections[brand] && (
-                                    <div className="px-4 pb-2">
-                                        {Object.keys(groupedProducts[brand]).map(name => (
-                                            <div key={name} className="border-t">
-                                                <button onClick={() => toggleSection(`${brand}-${name}`)} className="w-full flex justify-between items-center py-3 px-2 font-semibold text-left">
-                                                    <span>{name}</span>
-                                                    {openSections[`${brand}-${name}`] ? <FiChevronDown /> : <FiChevronRight />}
-                                                </button>
-                                                {openSections[`${brand}-${name}`] && (
-                                                    <div className='pl-4 pb-2'>
-                                                        {groupedProducts[brand][name].map(product => {
-                                                            const isLowStock = product.quantity <= product.lowStockThreshold && product.lowStockThreshold > 0;
-                                                            return (
-                                                                <div key={product.id}>
-                                                                    <div className={`flex items-center justify-between p-2 my-1 rounded-md cursor-pointer ${isLowStock ? 'bg-red-50 hover:bg-red-100' : 'hover:bg-gray-100'}`} onClick={() => handleSelectProduct(product.id)}>
-                                                                        <div className="flex-1 flex items-center">
-                                                                            {isLowStock && <div className="w-2 h-2 bg-red-500 rounded-full mr-3 flex-shrink-0" title="Bajo stock"></div>}
-                                                                            <div>
-                                                                                <p className="font-medium text-gray-800">{product.subtype || 'Producto base'}</p>
-                                                                                <p className="text-sm text-gray-500 flex items-center">
-                                                                                    <span>Stock: {product.quantity}</span>
-                                                                                    <span className="mx-2 text-gray-300">|</span>
-                                                                                    <span className="font-semibold text-gray-700">
-                                                                                        ${formatNumber(product.salePrices[0]?.price ?? 0)}
-                                                                                    </span>
-                                                                                </p>
-                                                                            </div>
-                                                                        </div>
-                                                                        <div className="flex items-center gap-1">
-                                                                            <button onClick={(e) => { e.stopPropagation(); setProductToRestock(product); }} className="p-2 text-green-600 hover:bg-green-100 rounded-full" title="Restock Rápido"><FiPlus size={16} /></button>
-                                                                            <button onClick={(e) => { e.stopPropagation(); handleEdit(product); }} className="p-2 text-yellow-600 hover:bg-yellow-100 rounded-full" title="Editar"><FiEdit size={16} /></button>
-                                                                            <button onClick={(e) => { e.stopPropagation(); handleDelete(product.id); }} className="p-2 text-red-600 hover:bg-red-100 rounded-full" title="Eliminar"><FiTrash2 size={16} /></button>
-                                                                        </div>
-                                                                    </div>
-                                                                    {selectedProductId === product.id && <ProductDetailView product={product} />}
-                                                                </div>
-                                                            )
-                                                        })}
-                                                    </div>
-                                                )}
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
+            {activeTab === 'inventory' && (
+                <>
+                    <div className="mb-6 bg-white p-4 rounded-lg shadow-sm">
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                            <div className="md:col-span-4">
+                                <div className="relative">
+                                    <FiSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+                                    <input type="text" placeholder="Buscar por nombre, línea, aroma o código..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-12 pr-12 py-3 border rounded-lg text-base focus:ring-blue-500 focus:border-blue-500" />
+                                    <button
+                                        onClick={() => setShowScanner(true)}
+                                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-blue-600 p-1"
+                                    >
+                                        <FiCamera size={24} />
+                                    </button>
+                                </div>
                             </div>
-                        ))
-                    ) : (
-                        <div className="text-center p-10 text-gray-500 bg-white rounded-lg shadow-sm">
-                            <FiSearch size={40} className="mx-auto mb-2" />
-                            No se encontraron productos que coincidan con tu búsqueda.
+                            <select name="brand" value={activeFilters.brand} onChange={handleFilterChange} className="w-full p-3 border rounded-lg bg-white">
+                                <option value="">Todas las Marcas</option>
+                                {uniqueBrands.map(brand => <option key={brand} value={brand}>{brand}</option>)}
+                            </select>
+                            <select name="name" value={activeFilters.name} onChange={handleFilterChange} className="w-full p-3 border rounded-lg bg-white">
+                                <option value="">Todos los Tipos</option>
+                                {uniqueNames.map(name => <option key={name} value={name}>{name}</option>)}
+                            </select>
+                            <select name="sortBy" value={activeFilters.sortBy} onChange={handleFilterChange} className="w-full p-3 border rounded-lg bg-white col-span-1 md:col-span-2">
+                                <option value="">Ordenar por...</option>
+                                <option value="stock_asc">Stock (Menor a Mayor)</option>
+                                <option value="stock_desc">Stock (Mayor a Menor)</option>
+                                <option value="price_asc">Precio (Menor a Mayor)</option>
+                                <option value="price_desc">Precio (Mayor a Menor)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    {showScanner && <BarcodeScannerModal onDetected={onBarcodeDetected} onClose={() => setShowScanner(false)} />}
+                    {showForm && <ProductForm productToEdit={productToEdit} onClose={handleCloseForm} />}
+                    {productToRestock && <RestockModal product={productToRestock} onClose={() => setProductToRestock(null)} />}
+
+                    {loading && <div className="text-center py-10">Cargando productos...</div>}
+                    {error && <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg" role="alert"><p><strong className="font-bold">Error:</strong> {error}</p></div>}
+
+                    {!loading && !error && (
+                        <div className="space-y-2">
+                            {Object.keys(groupedProducts).length > 0 ? (
+                                Object.keys(groupedProducts).map(brand => (
+                                    <div key={brand} className="bg-white rounded-lg shadow-sm">
+                                        <button onClick={() => toggleSection(brand)} className="w-full flex justify-between items-center p-4 font-bold text-lg text-left">
+                                            <span>{brand}</span>
+                                            {openSections[brand] ? <FiChevronDown /> : <FiChevronRight />}
+                                        </button>
+                                        {openSections[brand] && (
+                                            <div className="px-4 pb-2">
+                                                {Object.keys(groupedProducts[brand]).map(name => (
+                                                    <div key={name} className="border-t">
+                                                        <button onClick={() => toggleSection(`${brand}-${name}`)} className="w-full flex justify-between items-center py-3 px-2 font-semibold text-left">
+                                                            <span>{name}</span>
+                                                            {openSections[`${brand}-${name}`] ? <FiChevronDown /> : <FiChevronRight />}
+                                                        </button>
+                                                        {openSections[`${brand}-${name}`] && (
+                                                            <div className='pl-4 pb-2'>
+                                                                {groupedProducts[brand][name].map(product => {
+                                                                    const isLowStock = product.quantity <= product.lowStockThreshold && product.lowStockThreshold > 0;
+                                                                    return (
+                                                                        <div key={product.id}>
+                                                                            <div className={`flex items-center justify-between p-2 my-1 rounded-md cursor-pointer ${isLowStock ? 'bg-red-50 hover:bg-red-100' : 'hover:bg-gray-100'}`} onClick={() => handleSelectProduct(product.id)}>
+                                                                                <div className="flex-1 flex items-center">
+                                                                                    {isLowStock && <div className="w-2 h-2 bg-red-500 rounded-full mr-3 flex-shrink-0" title="Bajo stock"></div>}
+                                                                                    <div>
+                                                                                        <p className="font-medium text-gray-800">{product.subtype || 'Producto base'}</p>
+                                                                                        <p className="text-sm text-gray-500 flex items-center">
+                                                                                            <span>Stock: {product.quantity}</span>
+                                                                                            <span className="mx-2 text-gray-300">|</span>
+                                                                                            <span className="font-semibold text-gray-700">
+                                                                                                ${formatNumber(product.salePrices[0]?.price ?? 0)}
+                                                                                            </span>
+                                                                                        </p>
+                                                                                    </div>
+                                                                                </div>
+                                                                                <div className="flex items-center gap-1">
+                                                                                    <button onClick={(e) => { e.stopPropagation(); setProductToRestock(product); }} className="p-2 text-green-600 hover:bg-green-100 rounded-full" title="Restock Rápido"><FiPlus size={16} /></button>
+                                                                                    <button onClick={(e) => { e.stopPropagation(); handleEdit(product); }} className="p-2 text-yellow-600 hover:bg-yellow-100 rounded-full" title="Editar"><FiEdit size={16} /></button>
+                                                                                    <button onClick={(e) => { e.stopPropagation(); handleDelete(product.id); }} className="p-2 text-red-600 hover:bg-red-100 rounded-full" title="Eliminar"><FiTrash2 size={16} /></button>
+                                                                                </div>
+                                                                            </div>
+                                                                            {selectedProductId === product.id && <ProductDetailView product={product} />}
+                                                                        </div>
+                                                                    )
+                                                                })}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                ))
+                            ) : (
+                                <div className="text-center p-10 text-gray-500 bg-white rounded-lg shadow-sm">
+                                    <FiSearch size={40} className="mx-auto mb-2" />
+                                    No se encontraron productos que coincidan con tu búsqueda.
+                                </div>
+                            )}
                         </div>
                     )}
-                </div>
+                </>
             )}
+
+            {activeTab === 'stockIncome' && <StockIncome />}
+            {activeTab === 'priceIncreases' && <PriceIncreases />}
         </div>
     );
 };
 
 export default InventoryPage;
-

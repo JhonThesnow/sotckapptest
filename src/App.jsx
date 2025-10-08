@@ -4,7 +4,7 @@ import DashboardPage from './pages/DashboardPage';
 import InventoryPage from './pages/InventoryPage';
 import SalesPage from './pages/SalesPage';
 import VentasPage from './pages/VentasPage';
-import ReportsPage from './pages/ReportsPage';
+import SalesReportsPage from './pages/SalesReportsPage';
 import AccountPage from './pages/AccountPage';
 import { FiBox, FiTag, FiBarChart2, FiShoppingCart, FiMenu, FiUser, FiHome } from 'react-icons/fi';
 
@@ -83,7 +83,7 @@ const AppLayout = () => {
             <Route path="/inventario" element={<InventoryPage />} />
             <Route path="/sales" element={<SalesPage />} />
             <Route path="/ventas" element={<VentasPage />} />
-            <Route path="/reports" element={<ReportsPage />} />
+            <Route path="/reports" element={<SalesReportsPage />} />
           </Routes>
         </main>
       </div>
