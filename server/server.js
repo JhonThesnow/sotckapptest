@@ -369,7 +369,12 @@ app.get('/api/sales', (req, res) => {
 
 app.put('/api/sales/:id/complete', (req, res) => {
     const { id } = req.params;
-    const { paymentMethod, finalDiscountPercentage } = req.body;
+    const { paymentMethod, finalDiscountPercentage, accountId } = req.body; // Recibir accountId
+
+    if (!accountId) {
+        return res.status(400).json({ error: "No se proporcionó una cuenta para la venta." });
+    }
+
     db.serialize(() => {
         db.run('BEGIN TRANSACTION');
         db.get('SELECT * FROM sales WHERE id = ? AND status = "pending"', [id], (err, sale) => {
@@ -379,17 +384,20 @@ app.put('/api/sales/:id/complete', (req, res) => {
             }
             const finalAmount = sale.totalAmount - (sale.totalAmount * ((finalDiscountPercentage || 0) / 100));
             const items = JSON.parse(sale.items);
-            const updateSaleSql = `UPDATE sales SET status = 'completed', paymentMethod = ?, finalDiscount = ?, finalAmount = ?, date = ? WHERE id = ?`;
-            db.run(updateSaleSql, [paymentMethod, (finalDiscountPercentage || 0), finalAmount, new Date().toISOString(), id], function (err) {
+            // Actualizar la venta para incluir el accountId
+            const updateSaleSql = `UPDATE sales SET status = 'completed', paymentMethod = ?, finalDiscount = ?, finalAmount = ?, date = ?, accountId = ? WHERE id = ?`;
+            db.run(updateSaleSql, [paymentMethod, (finalDiscountPercentage || 0), finalAmount, new Date().toISOString(), accountId, id], function (err) {
                 if (err) { db.run('ROLLBACK'); return res.status(500).json({ error: 'Error al actualizar la venta', details: err.message }); }
+
                 const updatePromises = items.map(item => new Promise((resolve, reject) => {
-                    if (!item.productId) return resolve(); // Ignora items genéricos
+                    if (!item.productId) return resolve();
                     const stockSql = `UPDATE products SET quantity = quantity - ? WHERE id = ? AND quantity >= ?`;
                     db.run(stockSql, [item.quantity, item.productId, item.quantity], function (err) {
                         if (err || this.changes === 0) return reject(new Error(`Stock insuficiente para el producto ID ${item.productId}`));
                         resolve();
                     });
                 }));
+
                 Promise.all(updatePromises).then(() => {
                     db.run('COMMIT');
                     res.status(200).json({ message: 'Venta completada y stock actualizado' });
@@ -415,6 +423,7 @@ app.post('/api/sales/history/:id/cancel', (req, res) => {
         db.get("SELECT * FROM sales WHERE id = ? AND status = 'completed'", [id], (err, sale) => {
             if (err) { db.run('ROLLBACK'); return res.status(500).json({ error: err.message }); }
             if (!sale) { db.run('ROLLBACK'); return res.status(404).json({ error: 'Venta no encontrada o no está completada.' }); }
+            if (!sale.accountId) { db.run('ROLLBACK'); return res.status(400).json({ error: 'La venta no tiene una cuenta asociada para revertir el movimiento.' }); }
 
             const items = JSON.parse(sale.items);
             const updateSaleSql = `UPDATE sales SET status = 'canceled', cancellationReason = ? WHERE id = ?`;
@@ -423,13 +432,13 @@ app.post('/api/sales/history/:id/cancel', (req, res) => {
                 if (err) { db.run('ROLLBACK'); return res.status(500).json({ error: 'Error al actualizar el estado de la venta.' }); }
 
                 const movementReason = `Cancelación Venta #${id}: ${reason}`;
-                const addMovementSql = `INSERT INTO account_movements (date, type, amount, reason) VALUES (?, 'withdrawal', ?, ?)`;
+                const addMovementSql = `INSERT INTO account_movements (date, type, amount, reason, accountId) VALUES (?, 'withdrawal', ?, ?, ?)`;
 
-                db.run(addMovementSql, [new Date().toISOString(), sale.finalAmount, movementReason], (err) => {
+                db.run(addMovementSql, [new Date().toISOString(), sale.finalAmount, movementReason, sale.accountId], (err) => {
                     if (err) { db.run('ROLLBACK'); return res.status(500).json({ error: 'Error al registrar el movimiento en la cuenta.' }); }
 
                     const stockPromises = items.map(item => new Promise((resolve, reject) => {
-                        if (!item.productId) return resolve(); // Ignora items genéricos
+                        if (!item.productId) return resolve();
                         const restockSql = `UPDATE products SET quantity = quantity + ? WHERE id = ?`;
                         db.run(restockSql, [item.quantity, item.productId], (err) => {
                             if (err) reject(err); else resolve();
@@ -493,7 +502,6 @@ app.put('/api/sales/history/:id/tax', (req, res) => {
     });
 });
 
-
 // --- Endpoints de REPORTES ---
 app.get('/api/reports/monthly-summary', (req, res) => {
     const { startDate, endDate } = req.query;
@@ -526,119 +534,238 @@ app.get('/api/reports/monthly-summary', (req, res) => {
     }).catch(err => res.status(500).json({ error: err.message }));
 });
 
-app.post('/api/sales-report-data', (req, res) => {
-    const { startDate, endDate, types = [], brands = [] } = req.body;
+// Helper function to process sales data for a given period
+const processReportData = (sales, productMap) => {
+    let totalRevenue = 0;
+    let totalProductsSold = 0;
+    let grossProfit = 0;
+    const salesByDay = {};
+    const productData = {};
+    const revenueByBrand = {};
+    const revenueByName = {};
 
-    let salesQuery = `
-        SELECT s.date, s.finalAmount, s.items
-        FROM sales s
-        JOIN (
-            SELECT DISTINCT sales_items.sale_id
-            FROM (
-                SELECT s.id AS sale_id, json_extract(item.value, '$.productId') AS product_id
-                FROM sales s, json_each(s.items) AS item
-            ) AS sales_items
-            LEFT JOIN products p ON p.id = sales_items.product_id
-            WHERE 1=1
-            ${types.length > 0 ? `AND p.type IN (${types.map(() => '?').join(',')})` : ''}
-            ${brands.length > 0 ? `AND p.brand IN (${brands.map(() => '?').join(',')})` : ''}
-        ) AS filtered_sales ON s.id = filtered_sales.sale_id
-        WHERE s.status = 'completed' AND s.date >= ? AND s.date <= ?
-    `;
+    sales.forEach(sale => {
+        const saleDate = sale.date.split('T')[0];
+        totalRevenue += sale.finalAmount;
 
-    const params = [...types, ...brands, startDate, endDate];
-
-    db.all(salesQuery, params, (err, sales) => {
-        if (err) {
-            return res.status(500).json({ error: "Database error", details: err.message });
+        if (!salesByDay[saleDate]) {
+            salesByDay[saleDate] = { sales: 0, items: 0 };
         }
+        salesByDay[saleDate].sales += sale.finalAmount;
 
-        let totalRevenue = 0;
-        let totalProductsSold = 0;
-        const salesByDay = {};
-        const productCounts = {};
+        const items = JSON.parse(sale.items);
+        items.forEach(item => {
+            if (!item.productId) return; // Skip quick sale items
 
-        sales.forEach(sale => {
-            const saleDate = sale.date.split('T')[0];
-            totalRevenue += sale.finalAmount;
+            totalProductsSold += item.quantity;
+            salesByDay[saleDate].items += item.quantity;
 
-            if (!salesByDay[saleDate]) {
-                salesByDay[saleDate] = { sales: 0, items: 0 };
+            const itemRevenue = item.unitPrice * item.quantity;
+            const itemCost = (item.purchasePrice || 0) * item.quantity;
+            const itemProfit = itemRevenue - itemCost;
+            grossProfit += itemProfit;
+
+            const productInfo = productMap.get(item.productId);
+
+            if (!productData[item.fullName]) {
+                productData[item.fullName] = { name: item.fullName, quantity: 0, revenue: 0, profit: 0 };
             }
-            salesByDay[saleDate].sales += sale.finalAmount;
+            productData[item.fullName].quantity += item.quantity;
+            productData[item.fullName].revenue += itemRevenue;
+            productData[item.fullName].profit += itemProfit;
 
-            const items = JSON.parse(sale.items);
-            items.forEach(item => {
-                totalProductsSold += item.quantity;
-                salesByDay[saleDate].items += item.quantity;
+            const brand = productInfo?.brand || 'Sin Marca';
+            const name = productInfo?.name || 'Varios';
 
-                if (productCounts[item.fullName]) {
-                    productCounts[item.fullName] += item.quantity;
-                } else {
-                    productCounts[item.fullName] = item.quantity;
-                }
-            });
-        });
+            if (!revenueByBrand[brand]) revenueByBrand[brand] = 0;
+            revenueByBrand[brand] += itemRevenue;
 
-        const topProducts = Object.entries(productCounts)
-            .map(([name, quantity]) => ({ name, quantity }))
-            .sort((a, b) => b.quantity - a.quantity)
-            .slice(0, 10);
-
-        const totalSalesInTop = topProducts.reduce((sum, p) => sum + p.quantity, 0);
-        const topProductsWithPercentage = topProducts.map(p => ({
-            ...p,
-            percentage: totalSalesInTop > 0 ? ((p.quantity / totalSalesInTop) * 100).toFixed(2) : 0,
-        }));
-
-
-        res.json({
-            summary: {
-                totalRevenue,
-                totalProductsSold,
-                totalSales: sales.length,
-            },
-            salesByDay,
-            topProducts: topProductsWithPercentage,
+            if (!revenueByName[name]) revenueByName[name] = 0;
+            revenueByName[name] += itemRevenue;
         });
     });
+
+    const topProducts = Object.values(productData)
+        .sort((a, b) => b.quantity - a.quantity);
+
+    return {
+        summary: {
+            totalRevenue,
+            totalProductsSold,
+            totalSales: sales.length,
+            grossProfit,
+            profitMargin: totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0,
+        },
+        salesByDay,
+        topProducts,
+        revenueByBrand: Object.entries(revenueByBrand).map(([name, value]) => ({ name, value })),
+        revenueByName: Object.entries(revenueByName).map(([name, value]) => ({ name, value })),
+    };
+};
+
+app.post('/api/sales-report-data', async (req, res) => {
+    try {
+        const { startDate, endDate, names = [], brands = [], compare } = req.body;
+
+        const products = await new Promise((resolve, reject) => {
+            db.all('SELECT id, name, brand FROM products', [], (err, rows) => err ? reject(err) : resolve(rows));
+        });
+        const productMap = new Map(products.map(p => [p.id, p]));
+
+        const getSalesForPeriod = (start, end) => new Promise((resolve, reject) => {
+            let salesQuery = `
+                SELECT s.id, s.date, s.finalAmount, s.items
+                FROM sales s
+                WHERE s.status = 'completed' AND s.date >= ? AND s.date <= ?
+            `;
+            let params = [start, end];
+
+            if (names.length > 0 || brands.length > 0) {
+                let productFilterClauses = [];
+                let filterParams = [];
+
+                if (names.length > 0) {
+                    productFilterClauses.push(`p.name IN (${names.map(() => '?').join(',')})`);
+                    filterParams.push(...names);
+                }
+                if (brands.length > 0) {
+                    productFilterClauses.push(`p.brand IN (${brands.map(() => '?').join(',')})`);
+                    filterParams.push(...brands);
+                }
+
+                salesQuery += `
+                    AND s.id IN (
+                        SELECT s2.id
+                        FROM sales s2, json_each(s2.items) AS item
+                        JOIN products p ON p.id = CAST(json_extract(item.value, '$.productId') AS INTEGER)
+                        WHERE ${productFilterClauses.join(' AND ')}
+                    )
+                `;
+                params.push(...filterParams);
+            }
+
+            db.all(salesQuery, params, (err, sales) => err ? reject(err) : resolve(sales));
+        });
+
+        const currentSales = await getSalesForPeriod(startDate, endDate);
+        const currentPeriodData = processReportData(currentSales, productMap);
+
+        let previousPeriodData = null;
+        if (compare) {
+            const start = new Date(startDate);
+            const end = new Date(endDate);
+            const diff = end.getTime() - start.getTime();
+            const prevStart = new Date(start.getTime() - diff - 1);
+            const prevEnd = new Date(start.getTime() - 1);
+            const previousSales = await getSalesForPeriod(prevStart.toISOString(), prevEnd.toISOString());
+            previousPeriodData = processReportData(previousSales, productMap);
+        }
+
+        res.json({ currentPeriod: currentPeriodData, previousPeriod: previousPeriodData });
+
+    } catch (err) {
+        res.status(500).json({ error: "Database error", details: err.message });
+    }
 });
 
 
 // --- Endpoints de CUENTA ---
+app.get('/api/accounts', (req, res) => {
+    db.all("SELECT * FROM accounts", [], (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ data: rows });
+    });
+});
+
+app.get('/api/movement-categories', (req, res) => {
+    db.all("SELECT * FROM movement_categories", [], (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ data: rows });
+    });
+});
+
 
 app.get('/api/account/summary', (req, res) => {
-    const { startDate, endDate } = req.query;
+    const { startDate, endDate, accountId } = req.query;
     if (!startDate || !endDate) return res.status(400).json({ error: "Fechas de inicio y fin son requeridas." });
-    const salesSql = "SELECT finalAmount, paymentMethod, items, appliedTax FROM sales WHERE status = 'completed' AND date >= ? AND date <= ?";
-    const expensesSql = "SELECT amount FROM expenses WHERE date >= ? AND date <= ?";
-    const movementsSql = "SELECT type, amount FROM account_movements WHERE date >= ? AND date <= ?";
+
+    const whereClause = accountId ? `AND accountId = ${accountId}` : '';
+
+    const salesSql = `SELECT finalAmount FROM sales WHERE status = 'completed' AND date >= ? AND date <= ? ${whereClause}`;
+    const expensesSql = `SELECT amount FROM expenses WHERE date >= ? AND date <= ? ${whereClause}`;
+    const movementsSql = "SELECT type, amount FROM account_movements WHERE date >= ? AND date <= ? " + (accountId ? `AND accountId = ${accountId}` : '');
+
     Promise.all([
         new Promise((resolve, reject) => db.all(salesSql, [startDate, endDate], (err, rows) => err ? reject(err) : resolve(rows))),
         new Promise((resolve, reject) => db.all(expensesSql, [startDate, endDate], (err, rows) => err ? reject(err) : resolve(rows))),
         new Promise((resolve, reject) => db.all(movementsSql, [startDate, endDate], (err, rows) => err ? reject(err) : resolve(rows))),
     ]).then(([sales, expenses, movements]) => {
-        const incomeByMethod = {};
-        sales.forEach(s => {
-            if (!s.paymentMethod) return;
-            if (!incomeByMethod[s.paymentMethod]) {
-                incomeByMethod[s.paymentMethod] = { total: 0, profit: 0, netProfit: 0 };
-            }
-            incomeByMethod[s.paymentMethod].total += s.finalAmount;
-            const saleItems = JSON.parse(s.items);
-            const costOfGoodsSold = saleItems.reduce((acc, i) => acc + (i.purchasePrice * i.quantity), 0);
-            const saleGrossProfit = s.finalAmount - costOfGoodsSold;
 
-            incomeByMethod[s.paymentMethod].profit += saleGrossProfit;
-            incomeByMethod[s.paymentMethod].netProfit += saleGrossProfit - (s.appliedTax || 0);
-        });
-        const totalIncome = sales.reduce((sum, s) => sum + s.finalAmount, 0);
+        const totalSales = sales.reduce((sum, s) => sum + s.finalAmount, 0);
         const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
-        const totalMovements = movements.reduce((sum, m) => sum + (m.type === 'deposit' ? m.amount : -m.amount), 0);
-        const totalBalance = totalIncome + totalMovements - totalExpenses;
-        res.json({ data: { totalBalance, incomeByMethod } });
+        const totalDeposits = movements.filter(m => m.type === 'deposit').reduce((sum, m) => sum + m.amount, 0);
+        const totalWithdrawals = movements.filter(m => m.type === 'withdrawal').reduce((sum, m) => sum + m.amount, 0);
+
+        const totalIncome = totalSales + totalDeposits;
+        const totalOutcome = totalExpenses + totalWithdrawals;
+
+        res.json({
+            data: {
+                totalIncome,
+                totalOutcome,
+                periodResult: totalIncome - totalOutcome,
+            }
+        });
     }).catch(err => res.status(500).json({ error: err.message }));
 });
+
+// NUEVO: Endpoint para Cierre de Caja
+app.get('/api/accounts/:id/cash-closing-data', (req, res) => {
+    const { id } = req.params;
+
+    db.get('SELECT date FROM cash_closings WHERE accountId = ? ORDER BY date DESC LIMIT 1', [id], (err, lastClosing) => {
+        if (err) return res.status(500).json({ error: err.message });
+
+        const startDate = lastClosing ? lastClosing.date : new Date(0).toISOString();
+        const endDate = new Date().toISOString();
+
+        const salesSql = `SELECT SUM(finalAmount) as total FROM sales WHERE accountId = ? AND paymentMethod = 'Efectivo' AND status = 'completed' AND date > ? AND date <= ?`;
+        const movementsSql = `SELECT type, SUM(amount) as total FROM account_movements WHERE accountId = ? AND date > ? AND date <= ? GROUP BY type`;
+
+        Promise.all([
+            new Promise((resolve, reject) => db.get(salesSql, [id, startDate, endDate], (err, row) => err ? reject(err) : resolve(row.total || 0))),
+            new Promise((resolve, reject) => db.all(movementsSql, [id, startDate, endDate], (err, rows) => err ? reject(err) : resolve(rows))),
+        ]).then(([salesTotal, movements]) => {
+            const deposits = movements.find(m => m.type === 'deposit')?.total || 0;
+            const withdrawals = movements.find(m => m.type === 'withdrawal')?.total || 0;
+
+            const expected = salesTotal + deposits - withdrawals;
+
+            res.json({
+                data: {
+                    lastClosingDate: startDate,
+                    salesTotal,
+                    deposits,
+                    withdrawals,
+                    expected
+                }
+            });
+        }).catch(err => res.status(500).json({ error: err.message }));
+    });
+});
+
+// NUEVO: Endpoint para guardar un Cierre de Caja
+app.post('/api/cash-closings', (req, res) => {
+    const { accountId, expected, counted, difference, notes } = req.body;
+    const sql = `INSERT INTO cash_closings (accountId, date, expected, counted, difference, notes) VALUES (?, ?, ?, ?, ?, ?)`;
+    const params = [accountId, new Date().toISOString(), expected, counted, difference, notes];
+
+    db.run(sql, params, function (err) {
+        if (err) return res.status(500).json({ error: err.message });
+        res.status(201).json({ message: "Cierre de caja guardado exitosamente", id: this.lastID });
+    });
+});
+
 
 app.delete('/api/account/movements/:id', (req, res) => {
     db.run('DELETE FROM account_movements WHERE id = ?', req.params.id, function (err) {
@@ -663,34 +790,58 @@ app.put('/api/account/movements/:id', (req, res) => {
 
 // --- OTROS Endpoints ---
 app.post('/api/expenses', (req, res) => {
-    const { description, amount } = req.body;
-    if (!description || !amount || amount <= 0) return res.status(400).json({ "error": "Descripción y monto son requeridos." });
-    db.run(`INSERT INTO expenses (date, description, amount) VALUES (?, ?, ?)`, [new Date().toISOString(), description, amount], function (err) {
-        if (err) return res.status(400).json({ "error": err.message });
-        res.status(201).json({ "data": { id: this.lastID, ...req.body } });
-    });
+    const { description, amount, accountId, categoryId } = req.body;
+    if (!description || !amount || amount <= 0 || !accountId || !categoryId) {
+        return res.status(400).json({ "error": "Todos los campos son requeridos." });
+    }
+    db.run(`INSERT INTO expenses (date, description, amount, accountId, categoryId) VALUES (?, ?, ?, ?, ?)`,
+        [new Date().toISOString(), description, amount, accountId, categoryId],
+        function (err) {
+            if (err) return res.status(400).json({ "error": err.message });
+            res.status(201).json({ "data": { id: this.lastID, ...req.body } });
+        });
 });
+
 app.get('/api/payment-methods', (req, res) => {
     db.all("SELECT * FROM payment_methods", [], (err, rows) => {
         if (err) return res.status(500).json({ error: err.message });
         res.json({ data: rows });
     });
 });
+
 app.post('/api/account/movements', (req, res) => {
-    const { type, amount, reason } = req.body;
-    db.run("INSERT INTO account_movements (date, type, amount, reason) VALUES (?, ?, ?, ?)", [new Date().toISOString(), type, amount, reason], function (err) {
-        if (err) return res.status(400).json({ error: err.message });
-        res.status(201).json({ id: this.lastID });
-    });
+    const { type, amount, reason, accountId, categoryId } = req.body;
+    if (!type || !amount || !reason || !accountId || !categoryId) {
+        return res.status(400).json({ error: 'Faltan datos para crear el movimiento.' });
+    }
+    db.run("INSERT INTO account_movements (date, type, amount, reason, accountId, categoryId) VALUES (?, ?, ?, ?, ?, ?)",
+        [new Date().toISOString(), type, amount, reason, accountId, categoryId],
+        function (err) {
+            if (err) return res.status(400).json({ error: err.message });
+            res.status(201).json({ id: this.lastID });
+        });
 });
+
 app.get('/api/account/movements', (req, res) => {
-    const { startDate, endDate } = req.query;
+    const { startDate, endDate, accountId } = req.query;
     if (!startDate || !endDate) return res.status(400).json({ error: "Fechas de inicio y fin son requeridas." });
-    db.all("SELECT * FROM account_movements WHERE date >= ? AND date <= ? ORDER BY date DESC", [startDate, endDate], (err, rows) => {
+
+    let sql = "SELECT m.*, c.name as categoryName FROM account_movements m LEFT JOIN movement_categories c ON c.id = m.categoryId WHERE m.date >= ? AND m.date <= ?";
+    let params = [startDate, endDate];
+
+    if (accountId) {
+        sql += " AND m.accountId = ?";
+        params.push(accountId);
+    }
+    sql += " ORDER BY m.date DESC";
+
+    db.all(sql, params, (err, rows) => {
         if (err) return res.status(500).json({ error: err.message });
         res.json({ data: rows });
     });
 });
+
+
 app.listen(PORT, () => {
     console.log(`Servidor corriendo en http://localhost:${PORT}`);
 });

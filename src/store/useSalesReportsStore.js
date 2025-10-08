@@ -7,8 +7,9 @@ const useSalesReportsStore = create((set, get) => ({
     filters: {
         startDate: startOfMonth(new Date()),
         endDate: endOfMonth(new Date()),
-        types: [],
+        names: [],
         brands: [],
+        compare: false, // Nuevo estado para la comparación
     },
     reportData: null,
     loading: false,
@@ -25,8 +26,9 @@ const useSalesReportsStore = create((set, get) => ({
             filters: {
                 startDate: startOfMonth(new Date()),
                 endDate: endOfMonth(new Date()),
-                types: [],
+                names: [],
                 brands: [],
+                compare: false,
             }
         });
         get().fetchReportData();
@@ -42,8 +44,9 @@ const useSalesReportsStore = create((set, get) => ({
                 body: JSON.stringify({
                     startDate: filters.startDate.toISOString(),
                     endDate: filters.endDate.toISOString(),
-                    types: filters.types.map(t => t.value),
-                    brands: filters.brands.map(b => b.value),
+                    names: filters.names ? filters.names.map(n => n.value) : [],
+                    brands: filters.brands ? filters.brands.map(b => b.value) : [],
+                    compare: filters.compare, // Enviar el flag de comparación
                 }),
             });
             if (!response.ok) {

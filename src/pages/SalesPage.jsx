@@ -18,6 +18,10 @@ const SalesPage = () => {
     const [selectedType, setSelectedType] = useState('Todos');
     const searchInputRef = useRef(null);
 
+    // --- Paginación State ---
+    const [currentPage, setCurrentPage] = useState(1);
+    const ITEMS_PER_PAGE = 7;
+
     const { products, fetchProducts, loading: productsLoading } = useProductStore();
     const {
         cart,
@@ -70,6 +74,18 @@ const SalesPage = () => {
         return tempProducts;
     }, [products, searchTerm, selectedBrand, selectedType]);
 
+    // --- Lógica de Paginación ---
+    const totalPages = Math.ceil(filteredProducts.length / ITEMS_PER_PAGE);
+    const paginatedProducts = useMemo(() => {
+        const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+        return filteredProducts.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+    }, [filteredProducts, currentPage]);
+
+    useEffect(() => {
+        setCurrentPage(1); // Resetea a la página 1 cada vez que cambian los filtros
+    }, [selectedBrand, selectedType, searchTerm]);
+
+
     const cartSubtotal = useMemo(() => {
         return cart.reduce((total, item) => {
             const price = item.salePrices[0]?.price || 0;
@@ -91,7 +107,6 @@ const SalesPage = () => {
         if (productFound) {
             handleAddItem(productFound);
         } else {
-            // Si no se encuentra, borra el campo de búsqueda como se solicitó.
             setSearchTerm('');
             if (window.innerWidth > 768) {
                 searchInputRef.current?.focus();
@@ -150,7 +165,7 @@ const SalesPage = () => {
                 </div>
 
                 <div className="flex-grow overflow-y-auto space-y-2 pr-2">
-                    {productsLoading ? <p className="text-center text-gray-500">Cargando productos...</p> : (filteredProducts || []).map(product => {
+                    {productsLoading ? <p className="text-center text-gray-500">Cargando productos...</p> : paginatedProducts.map(product => {
                         const itemInCart = cart.find(item => item.id === product.id);
                         return (
                             <div key={product.id} className="border rounded-lg p-3 flex justify-between items-center">
@@ -171,6 +186,24 @@ const SalesPage = () => {
                             </div>
                         );
                     })}
+                </div>
+                {/* Controles de Paginación */}
+                <div className="flex justify-center items-center gap-4 pt-4 mt-auto border-t">
+                    <button
+                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                        disabled={currentPage === 1}
+                        className="p-2 rounded-lg bg-gray-200 hover:bg-gray-300 disabled:opacity-50"
+                    >
+                        <FiChevronLeft />
+                    </button>
+                    <span className="font-medium text-gray-700">Página {currentPage} de {totalPages}</span>
+                    <button
+                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                        disabled={currentPage === totalPages}
+                        className="p-2 rounded-lg bg-gray-200 hover:bg-gray-300 disabled:opacity-50"
+                    >
+                        <FiChevronRight />
+                    </button>
                 </div>
             </div>
 
@@ -229,4 +262,3 @@ const SalesPage = () => {
 };
 
 export default SalesPage;
-

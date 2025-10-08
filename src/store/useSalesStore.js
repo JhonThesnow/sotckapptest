@@ -20,11 +20,9 @@ const useSalesStore = create((set, get) => ({
     // --- CART ACTIONS ---
     addItemToCart: (product) => {
         set(state => {
-            // Para productos genéricos de venta rápida, permite agregar múltiples veces como líneas separadas
             if (product.id.toString().startsWith('qs-')) {
                 return { cart: [...state.cart, { ...product, id: `qs-${Date.now()}` }] };
             }
-
             const itemInCart = state.cart.find((item) => item.id === product.id);
             if (itemInCart) {
                 if (itemInCart.quantity < product.quantity) {
@@ -49,18 +47,15 @@ const useSalesStore = create((set, get) => ({
     },
     updateItemQuantity: (productId, quantity) => {
         const productInDB = useProductStore.getState().products.find(p => p.id === productId);
-
         let newQuantity = parseInt(quantity, 10);
         if (isNaN(newQuantity) || newQuantity < 1) newQuantity = 1;
 
-        // Si es un producto del inventario, chequea el stock.
         if (productInDB) {
             if (newQuantity > productInDB.quantity) {
                 alert(`Solo hay ${productInDB.quantity} unidades en stock.`);
                 newQuantity = productInDB.quantity;
             }
         }
-
         set(state => ({
             cart: state.cart.map(item =>
                 item.id === productId ? { ...item, quantity: newQuantity } : item
@@ -101,15 +96,9 @@ const useSalesStore = create((set, get) => ({
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(saleData),
             });
-
             if (!response.ok) {
-                try {
-                    const errorData = await response.json();
-                    throw new Error(errorData.error || errorData.details || 'Error desconocido del servidor.');
-                } catch (jsonError) {
-                    const errorText = await response.text();
-                    throw new Error(errorText || 'Falló al crear la venta pendiente');
-                }
+                const errorData = await response.json();
+                throw new Error(errorData.error || 'Falló al crear la venta pendiente');
             }
             set({ loading: false, cart: [], currentPaymentMethod: null });
             get().fetchAllSales();
@@ -126,12 +115,7 @@ const useSalesStore = create((set, get) => ({
             const response = await fetch(`${API_URL}/sales`);
             if (!response.ok) throw new Error('No se pudieron obtener las ventas');
             const json = await response.json();
-
-            const allSales = json.data.map(s => ({
-                ...s,
-                items: JSON.parse(s.items)
-            }));
-
+            const allSales = json.data.map(s => ({ ...s, items: JSON.parse(s.items) }));
             set({
                 pendingSales: allSales.filter(s => s.status === 'pending'),
                 completedSales: allSales.filter(s => s.status === 'completed' || s.status === 'canceled'),
@@ -145,14 +129,29 @@ const useSalesStore = create((set, get) => ({
     completeSale: async (saleId, saleData) => {
         set({ loading: true, error: null });
         try {
+            const { accounts } = useAccountStore.getState();
+            let accountId = null;
+
+            if (saleData.paymentMethod === 'Efectivo') {
+                const cashAccount = accounts.find(acc => acc.type === 'Efectivo');
+                accountId = cashAccount ? cashAccount.id : (accounts[0]?.id || null);
+            } else {
+                const digitalAccount = accounts.find(acc => acc.type === 'Digital');
+                accountId = digitalAccount ? digitalAccount.id : (accounts[0]?.id || null);
+            }
+
+            if (!accountId) {
+                throw new Error("No se encontró una cuenta apropiada para registrar la venta.");
+            }
+
             const response = await fetch(`${API_URL}/sales/${saleId}/complete`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(saleData),
+                body: JSON.stringify({ ...saleData, accountId }),
             });
             if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(errorText || 'Falló al completar la venta');
+                const errorText = await response.json();
+                throw new Error(errorText.error || 'Falló al completar la venta');
             }
             get().fetchAllSales();
             useProductStore.getState().fetchProducts();
@@ -178,12 +177,7 @@ const useSalesStore = create((set, get) => ({
             }
             get().fetchAllSales();
             useProductStore.getState().fetchProducts();
-            const { startDate, endDate } = useAccountStore.getState();
-            if (startDate && endDate) {
-                get().fetchSummary(startDate.toISOString(), endDate.toISOString());
-            }
-            useAccountStore.getState().fetchAccountSummary();
-            useAccountStore.getState().fetchMovements();
+            useAccountStore.getState().fetchDataForCurrentState();
             return { success: true };
         } catch (e) {
             set({ loading: false, error: e.message });
@@ -204,11 +198,7 @@ const useSalesStore = create((set, get) => ({
                 throw new Error(err.error || 'Falló al actualizar la venta.');
             }
             get().fetchAllSales();
-            const { startDate, endDate } = useAccountStore.getState();
-            if (startDate && endDate) {
-                get().fetchSummary(startDate.toISOString(), endDate.toISOString());
-            }
-            useAccountStore.getState().fetchAccountSummary();
+            useAccountStore.getState().fetchDataForCurrentState();
             return { success: true };
         } catch (e) {
             set({ loading: false, error: e.message });
@@ -236,11 +226,7 @@ const useSalesStore = create((set, get) => ({
             const response = await fetch(`${API_URL}/sales/history/${saleId}`, { method: 'DELETE' });
             if (!response.ok) throw new Error('Falló al eliminar la venta');
             get().fetchAllSales();
-            const { startDate, endDate } = useAccountStore.getState();
-            if (startDate && endDate) {
-                get().fetchSummary(startDate.toISOString(), endDate.toISOString());
-            }
-            useAccountStore.getState().fetchAccountSummary();
+            useAccountStore.getState().fetchDataForCurrentState();
         } catch (e) {
             console.error("Error deleting completed sale:", e);
             alert(e.message);
@@ -260,11 +246,7 @@ const useSalesStore = create((set, get) => ({
                 throw new Error(err.error || 'Falló al aplicar el impuesto.');
             }
             get().fetchAllSales();
-            const { startDate, endDate } = useAccountStore.getState();
-            if (startDate && endDate) {
-                get().fetchSummary(startDate.toISOString(), endDate.toISOString());
-            }
-            useAccountStore.getState().fetchAccountSummary();
+            useAccountStore.getState().fetchDataForCurrentState();
             return { success: true };
         } catch (e) {
             set({ loading: false, error: e.message });
@@ -292,11 +274,7 @@ const useSalesStore = create((set, get) => ({
                 body: JSON.stringify(expenseData),
             });
             if (!response.ok) throw new Error('Falló al agregar el gasto');
-            const { startDate, endDate } = useAccountStore.getState();
-            if (startDate && endDate) {
-                get().fetchSummary(startDate.toISOString(), endDate.toISOString());
-            }
-            useAccountStore.getState().fetchAccountSummary();
+            useAccountStore.getState().fetchDataForCurrentState();
         } catch (e) {
             console.error("Error adding expense:", e);
             alert(e.message);
@@ -307,11 +285,7 @@ const useSalesStore = create((set, get) => ({
         try {
             const response = await fetch(`${API_URL}/expenses/${expenseId}`, { method: 'DELETE' });
             if (!response.ok) throw new Error('Falló al eliminar el gasto');
-            const { startDate, endDate } = useAccountStore.getState();
-            if (startDate && endDate) {
-                get().fetchSummary(startDate.toISOString(), endDate.toISOString());
-            }
-            useAccountStore.getState().fetchAccountSummary();
+            useAccountStore.getState().fetchDataForCurrentState();
         } catch (e) {
             console.error("Error deleting expense:", e);
             alert(e.message);
