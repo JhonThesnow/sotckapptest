@@ -15,7 +15,7 @@ const Navigation = ({ onLinkClick }) => {
   };
   return (
     <nav className="bg-gray-800 text-white w-64 h-full p-4 flex flex-col flex-shrink-0">
-      <div className="text-2xl font-bold mb-10 text-center">StockManager</div>
+      <div className="text-2xl font-bold mb-10 text-center">Hindumar STOCK</div>
       <ul className="space-y-2">
         <li>
           <NavLink to="/" style={({ isActive }) => isActive ? activeLinkStyle : undefined} onClick={onLinkClick} className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-700 transition-colors">
@@ -71,7 +71,7 @@ const AppLayout = () => {
       </div>
       <div className="flex-1 flex flex-col overflow-hidden">
         <header className="md:hidden bg-white shadow-md p-4 flex justify-between items-center z-10">
-          <h1 className="text-xl font-bold">StockManager</h1>
+          <h1 className="text-xl font-bold">Hindumar STOCK</h1>
           <button onClick={() => setIsMenuOpen(true)}>
             <FiMenu size={24} />
           </button>
