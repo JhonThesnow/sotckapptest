@@ -63,53 +63,34 @@ const InventoryPage = () => {
     const [searchTerm, setSearchTerm] = useState('');
     const [activeFilters, setActiveFilters] = useState({ brand: '', name: '', sortBy: '' });
     const [showScanner, setShowScanner] = useState(false);
+    const [currentPage, setCurrentPage] = useState(1);
 
-    const { products, loading, error, fetchProducts, deleteProduct } = useProductStore();
+    const { products, totalPages, loading, error, fetchProducts, deleteProduct } = useProductStore();
+
+    // Lista de productos completa para los filtros
+    const [allProducts, setAllProducts] = useState([]);
 
     useEffect(() => {
-        fetchProducts();
-    }, [fetchProducts]);
+        // Cargar todos los productos una vez para los filtros
+        const fetchAll = async () => {
+            const response = await fetch('/api/products?limit=9999');
+            const json = await response.json();
+            setAllProducts(json.data);
+        };
+        fetchAll();
+    }, []);
 
-    const uniqueBrands = useMemo(() => [...new Set(products.map(p => p.brand).filter(Boolean))].sort(), [products]);
-    const uniqueNames = useMemo(() => [...new Set(products.map(p => p.name).filter(Boolean))].sort(), [products]);
+    useEffect(() => {
+        fetchProducts({ page: currentPage, ...activeFilters, searchTerm, limit: 15 });
+    }, [fetchProducts, currentPage, activeFilters, searchTerm]);
 
-    const filteredProducts = useMemo(() => {
-        let result = [...products];
+    const uniqueBrands = useMemo(() => [...new Set(allProducts.map(p => p.brand).filter(Boolean))].sort(), [allProducts]);
+    const uniqueNames = useMemo(() => [...new Set(allProducts.map(p => p.name).filter(Boolean))].sort(), [allProducts]);
 
-        if (searchTerm.trim()) {
-            const searchWords = searchTerm.toLowerCase().split(' ').filter(word => word);
-            result = result.filter(product => {
-                const searchableString = `${product.brand || ''} ${product.name} ${product.subtype} ${product.code || ''}`.toLowerCase();
-                return searchWords.every(word => searchableString.includes(word));
-            });
-        }
-
-        if (activeFilters.brand) {
-            result = result.filter(p => p.brand === activeFilters.brand);
-        }
-        if (activeFilters.name) {
-            result = result.filter(p => p.name === activeFilters.name);
-        }
-
-        if (activeFilters.sortBy === 'stock_asc') {
-            result.sort((a, b) => a.quantity - b.quantity);
-        } else if (activeFilters.sortBy === 'stock_desc') {
-            result.sort((a, b) => b.quantity - a.quantity);
-        } else if (activeFilters.sortBy === 'price_asc') {
-            result.sort((a, b) => (a.salePrices[0]?.price ?? 0) - (b.salePrices[0]?.price ?? 0));
-        } else if (activeFilters.sortBy === 'price_desc') {
-            result.sort((a, b) => (b.salePrices[0]?.price ?? 0) - (a.salePrices[0]?.price ?? 0));
-        }
-
-        return result;
-    }, [products, searchTerm, activeFilters]);
 
     const groupedProducts = useMemo(() => {
-        if (activeFilters.sortBy) {
-            return { 'Resultados del Filtro': { 'Todos': filteredProducts } };
-        }
         const groups = {};
-        filteredProducts.forEach(product => {
+        products.forEach(product => {
             const brand = (product.brand || 'Sin Marca').trim();
             const name = product.name;
             if (!groups[brand]) groups[brand] = {};
@@ -117,27 +98,30 @@ const InventoryPage = () => {
             groups[brand][name].push(product);
         });
         return groups;
-    }, [filteredProducts, activeFilters.sortBy]);
+    }, [products]);
 
     useEffect(() => {
-        if (searchTerm.trim() || activeFilters.brand || activeFilters.name || activeFilters.sortBy) {
-            const newOpenSections = {};
-            for (const brand in groupedProducts) {
-                newOpenSections[brand] = true;
-                for (const name in groupedProducts[brand]) {
-                    newOpenSections[`${brand}-${name}`] = true;
-                }
+        // Abrir todas las secciones al filtrar
+        const newOpenSections = {};
+        for (const brand in groupedProducts) {
+            newOpenSections[brand] = true;
+            for (const name in groupedProducts[brand]) {
+                newOpenSections[`${brand}-${name}`] = true;
             }
-            setOpenSections(newOpenSections);
-        } else {
-            setOpenSections({});
         }
-    }, [searchTerm, groupedProducts, activeFilters]);
+        setOpenSections(newOpenSections);
+    }, [groupedProducts]);
 
     const handleFilterChange = (e) => {
         const { name, value } = e.target;
         setActiveFilters(prev => ({ ...prev, [name]: value }));
+        setCurrentPage(1); // Reset page on filter change
     };
+
+    const handleSearchChange = (e) => {
+        setSearchTerm(e.target.value);
+        setCurrentPage(1);
+    }
 
     const toggleSection = (key) => {
         setOpenSections(prev => ({ ...prev, [key]: !prev[key] }));
@@ -202,7 +186,7 @@ const InventoryPage = () => {
                             <div className="md:col-span-4">
                                 <div className="relative">
                                     <FiSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
-                                    <input type="text" placeholder="Buscar por nombre, línea, aroma o código..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-12 pr-12 py-3 border rounded-lg text-base focus:ring-blue-500 focus:border-blue-500" />
+                                    <input type="text" placeholder="Buscar por nombre, línea, aroma o código..." value={searchTerm} onChange={handleSearchChange} className="w-full pl-12 pr-12 py-3 border rounded-lg text-base focus:ring-blue-500 focus:border-blue-500" />
                                     <button
                                         onClick={() => setShowScanner(true)}
                                         className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-blue-600 p-1"
@@ -239,7 +223,7 @@ const InventoryPage = () => {
                     {!loading && !error && (
                         <div className="space-y-2">
                             {Object.keys(groupedProducts).length > 0 ? (
-                                Object.keys(groupedProducts).map(brand => (
+                                Object.keys(groupedProducts).sort().map(brand => (
                                     <div key={brand} className="bg-white rounded-lg shadow-sm">
                                         <button onClick={() => toggleSection(brand)} className="w-full flex justify-between items-center p-4 font-bold text-lg text-left">
                                             <span>{brand}</span>
@@ -247,7 +231,7 @@ const InventoryPage = () => {
                                         </button>
                                         {openSections[brand] && (
                                             <div className="px-4 pb-2">
-                                                {Object.keys(groupedProducts[brand]).map(name => (
+                                                {Object.keys(groupedProducts[brand]).sort().map(name => (
                                                     <div key={name} className="border-t">
                                                         <button onClick={() => toggleSection(`${brand}-${name}`)} className="w-full flex justify-between items-center py-3 px-2 font-semibold text-left">
                                                             <span>{name}</span>
@@ -295,6 +279,13 @@ const InventoryPage = () => {
                                 <div className="text-center p-10 text-gray-500 bg-white rounded-lg shadow-sm">
                                     <FiSearch size={40} className="mx-auto mb-2" />
                                     No se encontraron productos que coincidan con tu búsqueda.
+                                </div>
+                            )}
+                            {totalPages > 1 && (
+                                <div className="flex justify-center items-center gap-4 pt-4 mt-4 border-t">
+                                    <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="p-2 rounded-lg bg-gray-200 hover:bg-gray-300 disabled:opacity-50">Anterior</button>
+                                    <span>Página {currentPage} de {totalPages}</span>
+                                    <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="p-2 rounded-lg bg-gray-200 hover:bg-gray-300 disabled:opacity-50">Siguiente</button>
                                 </div>
                             )}
                         </div>

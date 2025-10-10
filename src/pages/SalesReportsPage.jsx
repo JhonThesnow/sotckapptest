@@ -48,19 +48,21 @@ const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#AF19FF', '#FF19AF'
 
 const SalesReportsPage = () => {
     const { filters, setFilters, reportData, loading, fetchReportData, resetFilters } = useSalesReportsStore();
-    const { products, fetchProducts } = useProductStore();
+    // Usamos el store de productos para la lista completa de filtros
+    const { products: allProducts, fetchProducts: fetchAllProducts } = useProductStore();
 
     const [activityRange, setActivityRange] = useState('daily');
     const [pieChartDataKey, setPieChartDataKey] = useState('revenueByName');
     const [sortConfig, setSortConfig] = useState({ key: 'quantity', direction: 'descending' });
 
     useEffect(() => {
-        fetchProducts();
+        // Traemos la lista completa de productos para los filtros
+        fetchAllProducts({ limit: 9999 });
         fetchReportData();
     }, []);
 
-    const productNamesOptions = useMemo(() => [...new Set(products.map(p => p.name))].map(name => ({ value: name, label: name })), [products]);
-    const productBrands = useMemo(() => [...new Set(products.map(p => p.brand).filter(Boolean))].map(b => ({ value: b, label: b })), [products]);
+    const productNamesOptions = useMemo(() => [...new Set(allProducts.map(p => p.name))].map(name => ({ value: name, label: name })), [allProducts]);
+    const productBrands = useMemo(() => [...new Set(allProducts.map(p => p.brand).filter(Boolean))].map(b => ({ value: b, label: b })), [allProducts]);
 
     const handleApplyFilters = () => fetchReportData();
     const handleSort = (key) => {

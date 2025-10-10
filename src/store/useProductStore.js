@@ -4,18 +4,37 @@ const API_URL = '/api';
 
 const useProductStore = create((set, get) => ({
     products: [],
+    totalPages: 1,
+    currentPage: 1,
     stockEntriesHistory: { entries: [], totalPages: 1 },
     priceIncreaseHistory: { entries: [], totalPages: 1 },
     loading: false,
     error: null,
 
-    fetchProducts: async () => {
+    fetchProducts: async (params = {}) => {
         set({ loading: true, error: null });
+        const { page = 1, limit = 10, brand, name, sortBy, searchTerm } = params;
+
+        const query = new URLSearchParams({
+            page: page.toString(),
+            limit: limit.toString(),
+        });
+
+        if (brand && brand !== 'Todas') query.append('brand', brand);
+        if (name && name !== 'Todos') query.append('name', name);
+        if (sortBy) query.append('sortBy', sortBy);
+        if (searchTerm) query.append('searchTerm', searchTerm);
+
         try {
-            const response = await fetch(`${API_URL}/products`);
+            const response = await fetch(`${API_URL}/products?${query.toString()}`);
             if (!response.ok) throw new Error('Falló al obtener los productos del servidor.');
             const json = await response.json();
-            set({ products: json.data, loading: false });
+            set({
+                products: json.data,
+                totalPages: json.totalPages,
+                currentPage: json.currentPage,
+                loading: false
+            });
         } catch (e) {
             set({ loading: false, error: e.message });
         }
@@ -33,7 +52,7 @@ const useProductStore = create((set, get) => ({
                 const err = await response.json();
                 throw new Error(err.details || 'Falló la carga por lote de productos.');
             }
-            get().fetchProducts();
+            get().fetchProducts(); // Recarga la primera página
             return { success: true };
         } catch (e) {
             set({ loading: false, error: e.message });
@@ -50,7 +69,7 @@ const useProductStore = create((set, get) => ({
                 body: JSON.stringify(updatedData),
             });
             if (!response.ok) throw new Error('Falló al actualizar el producto.');
-            get().fetchProducts();
+            get().fetchProducts({ page: get().currentPage }); // Recarga la página actual
         } catch (e) {
             set({ loading: false, error: e.message });
         }
@@ -63,7 +82,7 @@ const useProductStore = create((set, get) => ({
                 method: 'DELETE',
             });
             if (!response.ok) throw new Error('Falló al eliminar el producto.');
-            get().fetchProducts();
+            get().fetchProducts({ page: get().currentPage }); // Recarga la página actual
         } catch (e) {
             set({ loading: false, error: e.message });
         }
@@ -78,7 +97,7 @@ const useProductStore = create((set, get) => ({
                 body: JSON.stringify({ products: productsToRestock }),
             });
             if (!response.ok) throw new Error('Falló el ingreso de stock por lote.');
-            get().fetchProducts();
+            get().fetchProducts({ page: get().currentPage });
         } catch (e) {
             set({ loading: false, error: e.message });
         }
@@ -93,7 +112,7 @@ const useProductStore = create((set, get) => ({
                 body: JSON.stringify(increaseData),
             });
             if (!response.ok) throw new Error('Falló al aumentar los precios.');
-            get().fetchProducts();
+            get().fetchProducts({ page: get().currentPage });
         } catch (e) {
             set({ loading: false, error: e.message });
         }

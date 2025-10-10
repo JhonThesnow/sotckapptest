@@ -17,12 +17,10 @@ const SalesPage = () => {
     const [selectedBrand, setSelectedBrand] = useState('Todas');
     const [selectedType, setSelectedType] = useState('Todos');
     const searchInputRef = useRef(null);
-
-    // --- Paginación State ---
     const [currentPage, setCurrentPage] = useState(1);
     const ITEMS_PER_PAGE = 7;
 
-    const { products, fetchProducts, loading: productsLoading } = useProductStore();
+    const { products, totalPages, fetchProducts, loading: productsLoading } = useProductStore();
     const {
         cart,
         addItemToCart,
@@ -34,52 +32,48 @@ const SalesPage = () => {
         fetchPaymentMethods
     } = useSalesStore();
 
+    // Estado para la lista completa de productos para los filtros
+    const [allProducts, setAllProducts] = useState([]);
+
     useEffect(() => {
-        fetchProducts();
+        // Cargar todos los productos una vez para los filtros
+        const fetchAll = async () => {
+            const response = await fetch('/api/products?limit=9999');
+            const json = await response.json();
+            setAllProducts(json.data);
+        };
+        fetchAll();
         fetchPaymentMethods();
-    }, [fetchProducts, fetchPaymentMethods]);
+    }, [fetchPaymentMethods]);
+
+    useEffect(() => {
+        fetchProducts({
+            page: currentPage,
+            limit: ITEMS_PER_PAGE,
+            brand: selectedBrand,
+            name: selectedType,
+            searchTerm,
+        });
+    }, [fetchProducts, currentPage, selectedBrand, selectedType, searchTerm]);
+
 
     const brands = useMemo(() => {
-        if (!products) return ['Todas'];
-        const brandSet = new Set(products.map(p => p.brand || 'Sin Marca'));
+        const brandSet = new Set(allProducts.map(p => p.brand || 'Sin Marca'));
         return ['Todas', ...Array.from(brandSet)];
-    }, [products]);
+    }, [allProducts]);
 
     const productTypes = useMemo(() => {
-        if (!products || selectedBrand === 'Todas') return ['Todos'];
+        if (selectedBrand === 'Todas') {
+            const typeSet = new Set(allProducts.map(p => p.name));
+            return ['Todos', ...Array.from(typeSet)];
+        }
         const typeSet = new Set(
-            products
+            allProducts
                 .filter(p => (p.brand || 'Sin Marca') === selectedBrand)
                 .map(p => p.name)
         );
         return ['Todos', ...Array.from(typeSet)];
-    }, [products, selectedBrand]);
-
-    const filteredProducts = useMemo(() => {
-        if (!products) return [];
-        let tempProducts = [...products];
-        if (selectedBrand !== 'Todas') {
-            tempProducts = tempProducts.filter(p => (p.brand || 'Sin Marca') === selectedBrand);
-        }
-        if (selectedType !== 'Todos') {
-            tempProducts = tempProducts.filter(p => p.name === selectedType);
-        }
-        if (searchTerm.trim()) {
-            const lowercasedSearchTerm = searchTerm.toLowerCase();
-            tempProducts = tempProducts.filter(product => {
-                const searchableString = `${product.brand || ''} ${product.name} ${product.subtype} ${product.code || ''}`.toLowerCase();
-                return searchableString.includes(lowercasedSearchTerm);
-            });
-        }
-        return tempProducts;
-    }, [products, searchTerm, selectedBrand, selectedType]);
-
-    // --- Lógica de Paginación ---
-    const totalPages = Math.ceil(filteredProducts.length / ITEMS_PER_PAGE);
-    const paginatedProducts = useMemo(() => {
-        const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-        return filteredProducts.slice(startIndex, startIndex + ITEMS_PER_PAGE);
-    }, [filteredProducts, currentPage]);
+    }, [allProducts, selectedBrand]);
 
     useEffect(() => {
         setCurrentPage(1); // Resetea a la página 1 cada vez que cambian los filtros
@@ -103,11 +97,12 @@ const SalesPage = () => {
 
     const onBarcodeDetected = (code) => {
         setShowScanner(false);
-        const productFound = products.find(p => p.code && p.code.toLowerCase() === code.toLowerCase());
+        // Usamos la lista completa de productos para buscar por código
+        const productFound = allProducts.find(p => p.code && p.code.toLowerCase() === code.toLowerCase());
         if (productFound) {
             handleAddItem(productFound);
         } else {
-            setSearchTerm('');
+            setSearchTerm(code); // Si no se encuentra, lo pone en el buscador
             if (window.innerWidth > 768) {
                 searchInputRef.current?.focus();
             }
@@ -156,7 +151,7 @@ const SalesPage = () => {
                         <select
                             value={selectedType}
                             onChange={(e) => setSelectedType(e.target.value)}
-                            disabled={selectedBrand === 'Todas' || productsLoading}
+                            disabled={productsLoading}
                             className="p-2 border rounded bg-white w-full sm:flex-1 disabled:bg-gray-100"
                         >
                             {(productTypes || []).map(type => <option key={type} value={type}>{type}</option>)}
@@ -165,7 +160,7 @@ const SalesPage = () => {
                 </div>
 
                 <div className="flex-grow overflow-y-auto space-y-2 pr-2">
-                    {productsLoading ? <p className="text-center text-gray-500">Cargando productos...</p> : paginatedProducts.map(product => {
+                    {productsLoading ? <p className="text-center text-gray-500">Cargando productos...</p> : products.map(product => {
                         const itemInCart = cart.find(item => item.id === product.id);
                         return (
                             <div key={product.id} className="border rounded-lg p-3 flex justify-between items-center">

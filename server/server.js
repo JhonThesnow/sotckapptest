@@ -39,15 +39,64 @@ app.get('/api/dashboard-summary', (req, res) => {
 });
 
 
-// --- Endpoints de PRODUCTOS ---
+// --- Endpoints de PRODUCTOS (CON PAGINACIÓN) ---
 app.get('/api/products', (req, res) => {
-    const sql = "SELECT * FROM products ORDER BY brand, name";
-    db.all(sql, [], (err, rows) => {
+    const { page = 1, limit = 10, brand, name, sortBy, searchTerm } = req.query;
+    const offset = (page - 1) * limit;
+
+    let whereClauses = [];
+    let params = [];
+
+    if (brand && brand !== 'Todas') {
+        whereClauses.push("brand = ?");
+        params.push(brand);
+    }
+    if (name && name !== 'Todos') {
+        whereClauses.push("name = ?");
+        params.push(name);
+    }
+    if (searchTerm) {
+        whereClauses.push("(name LIKE ? OR subtype LIKE ? OR brand LIKE ? OR code LIKE ?)");
+        const term = `%${searchTerm}%`;
+        params.push(term, term, term, term);
+    }
+
+    const where = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
+    let orderBy = 'ORDER BY brand, name';
+    if (sortBy) {
+        switch (sortBy) {
+            case 'stock_asc': orderBy = 'ORDER BY quantity ASC'; break;
+            case 'stock_desc': orderBy = 'ORDER BY quantity DESC'; break;
+            case 'price_asc': orderBy = `ORDER BY json_extract(salePrices, '$[0].price') ASC`; break;
+            case 'price_desc': orderBy = `ORDER BY json_extract(salePrices, '$[0].price') DESC`; break;
+        }
+    }
+
+    const countSql = `SELECT COUNT(*) as count FROM products ${where}`;
+    const dataSql = `SELECT * FROM products ${where} ${orderBy} LIMIT ? OFFSET ?`;
+
+    db.get(countSql, params, (err, row) => {
         if (err) return res.status(500).json({ "error": err.message });
-        const products = rows.map(p => ({ ...p, salePrices: JSON.parse(p.salePrices || '[]') }));
-        res.json({ "message": "success", "data": products });
+
+        const totalProducts = row.count;
+        const totalPages = Math.ceil(totalProducts / limit);
+
+        db.all(dataSql, [...params, limit, offset], (err, rows) => {
+            if (err) return res.status(500).json({ "error": err.message });
+
+            const products = rows.map(p => ({ ...p, salePrices: JSON.parse(p.salePrices || '[]') }));
+
+            res.json({
+                message: "success",
+                data: products,
+                totalPages,
+                currentPage: parseInt(page, 10),
+            });
+        });
     });
 });
+
 
 app.post('/api/products/batch', (req, res) => {
     const products = req.body;
