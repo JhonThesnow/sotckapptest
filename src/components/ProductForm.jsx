@@ -1,5 +1,3 @@
-// src/components/ProductForm.jsx
-
 import React, { useState, useEffect } from 'react';
 import useProductStore from '../store/useProductStore.js';
 import { FiX, FiPlus, FiTrash, FiArrowLeft, FiCamera } from 'react-icons/fi';
@@ -382,4 +380,3 @@ const ProductForm = ({ productToEdit, onClose }) => {
 };
 
 export default ProductForm;
-

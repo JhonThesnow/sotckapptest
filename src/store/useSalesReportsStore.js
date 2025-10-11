@@ -9,7 +9,8 @@ const useSalesReportsStore = create((set, get) => ({
         endDate: endOfMonth(new Date()),
         names: [],
         brands: [],
-        compare: false, // Nuevo estado para la comparación
+        lines: [], // Nuevo estado para líneas de producto
+        compare: false,
     },
     reportData: null,
     loading: false,
@@ -28,6 +29,7 @@ const useSalesReportsStore = create((set, get) => ({
                 endDate: endOfMonth(new Date()),
                 names: [],
                 brands: [],
+                lines: [], // Resetear líneas
                 compare: false,
             }
         });
@@ -46,7 +48,8 @@ const useSalesReportsStore = create((set, get) => ({
                     endDate: filters.endDate.toISOString(),
                     names: filters.names ? filters.names.map(n => n.value) : [],
                     brands: filters.brands ? filters.brands.map(b => b.value) : [],
-                    compare: filters.compare, // Enviar el flag de comparación
+                    lines: filters.lines ? filters.lines.map(l => l.value) : [], // Enviar líneas
+                    compare: filters.compare,
                 }),
             });
             if (!response.ok) {

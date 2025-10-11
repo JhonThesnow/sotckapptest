@@ -167,7 +167,7 @@ const SalesPage = () => {
                                 <div>
                                     <p className="font-bold">{product.name} - {product.subtype}</p>
                                     <p className="text-sm text-gray-500">
-                                        Stock: {product.quantity} | ${formatNumber(product.salePrices[0]?.price || 0)}
+                                        Stock: {product.quantity} | {product.salePrices[0]?.name}: ${formatNumber(product.salePrices[0]?.price || 0)}
                                     </p>
                                 </div>
                                 <button
@@ -213,7 +213,7 @@ const SalesPage = () => {
                         <div key={item.id} className="flex items-center gap-2 mb-4">
                             <div className="flex-grow">
                                 <p className="font-semibold text-sm">{item.name}{item.subtype ? ` - ${item.subtype}` : ''}</p>
-                                <p className="text-sm text-gray-600">${formatNumber(item.salePrices[0]?.price || 0)}</p>
+                                <p className="text-sm text-gray-600">{item.salePrices[0]?.name}: ${formatNumber(item.salePrices[0]?.price || 0)}</p>
                             </div>
                             <div className="flex items-center gap-1 border rounded-lg p-1">
                                 <button onClick={() => updateItemQuantity(item.id, item.quantity - 1)} className="p-1"><FiMinus size={14} /></button>

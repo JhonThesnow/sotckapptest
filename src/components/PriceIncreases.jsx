@@ -109,7 +109,7 @@ const PriceIncreases = () => {
                 </div>
                 <div className="flex gap-4 mb-4">
                     <label><input type="checkbox" checked={targetPrice.purchase} onChange={e => setTargetPrice(p => ({ ...p, purchase: e.target.checked }))} /> P. Compra</label>
-                    <label><input type="checkbox" checked={targetPrice.retail} onChange={e => setTargetPrice(p => ({ ...p, retail: e.target.checked }))} /> Minorista</label>
+                    <label><input type="checkbox" checked={targetPrice.retail} onChange={e => setTargetPrice(p => ({ ...p, retail: e.target.checked }))} /> {products[0]?.salePrices[0]?.name || 'Precio de Venta'}</label>
                 </div>
                 <div className="relative mb-4">
                     <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -132,7 +132,7 @@ const PriceIncreases = () => {
                             />
                             <div className="flex-grow">
                                 <p className="font-semibold">{product.name} - {product.subtype}</p>
-                                <p className="text-sm text-gray-500">P. Compra: ${product.purchasePrice} | Minorista: ${product.salePrices[0]?.price}</p>
+                                <p className="text-sm text-gray-500">P. Compra: ${product.purchasePrice} | {product.salePrices[0]?.name}: ${product.salePrices[0]?.price}</p>
                             </div>
                         </div>
                     ))}
@@ -169,13 +169,17 @@ const PriceIncreases = () => {
                                                 </div>
                                                 {openEntries[entry.id] && (
                                                     <ul className="list-disc pl-5 text-xs mt-2">
-                                                        {JSON.parse(entry.products).map(p => (
-                                                            <li key={p.id}>
-                                                                {p.name} - {p.subtype}:
-                                                                {p.oldPurchasePrice !== p.newPurchasePrice && <span> Compra: ${p.oldPurchasePrice} -{'>'} ${p.newPurchasePrice}</span>}
-                                                                {p.oldRetailPrice !== p.newRetailPrice && <span> Minorista: ${p.oldRetailPrice} -{'>'} ${p.newRetailPrice}</span>}
-                                                            </li>
-                                                        ))}
+                                                        {JSON.parse(entry.products).map(p => {
+                                                            const productInfo = products.find(prod => prod.id === p.id);
+                                                            const priceName = productInfo?.salePrices[0]?.name || 'Precio Venta';
+                                                            return (
+                                                                <li key={p.id}>
+                                                                    {p.name} - {p.subtype}:
+                                                                    {p.oldPurchasePrice !== p.newPurchasePrice && <span> Compra: ${p.oldPurchasePrice} -{'>'} ${p.newPurchasePrice}</span>}
+                                                                    {p.oldRetailPrice !== p.newRetailPrice && <span> {priceName}: ${p.oldRetailPrice} -{'>'} ${p.newRetailPrice}</span>}
+                                                                </li>
+                                                            )
+                                                        })}
                                                     </ul>
                                                 )}
                                             </div>

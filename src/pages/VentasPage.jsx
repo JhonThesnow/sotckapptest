@@ -87,6 +87,18 @@ const VentasPage = () => {
 
     const toggleDay = (day) => setOpenDays(prev => ({ ...prev, [day]: !prev[day] }));
 
+    const renderSaleItems = (items) => {
+        return (
+            <ul className="list-disc pl-5">
+                {items.map((item, index) => (
+                    <li key={index} className="text-sm">
+                        {item.quantity}x {item.fullName}
+                    </li>
+                ))}
+            </ul>
+        );
+    };
+
     return (
         <div className="p-4 md:p-6 bg-gray-50 min-h-full">
             {saleToComplete && <CompleteSaleModal sale={saleToComplete} onClose={() => setSaleToComplete(null)} />}
@@ -121,7 +133,7 @@ const VentasPage = () => {
                                     pendingSales.map(sale => (
                                         <tr key={sale.id} className="border-b hover:bg-gray-50">
                                             <td className="p-4 whitespace-nowrap">{formatDate(sale.date)}</td>
-                                            <td className="p-4 text-sm">{sale.items.map(item => item.fullName).join(', ')}</td>
+                                            <td className="p-4">{renderSaleItems(sale.items)}</td>
                                             <td className="p-4 font-bold text-blue-600">${formatNumber(sale.totalAmount)}</td>
                                             <td className="p-4 text-center flex justify-center items-center gap-2">
                                                 <button onClick={() => setSaleToComplete(sale)} className="bg-green-500 text-white py-1 px-3 rounded hover:bg-green-600">Configurar Cobro</button>
@@ -174,7 +186,7 @@ const VentasPage = () => {
                                                         <div key={mov.key} className={`py-2 flex justify-between items-center text-sm border-b last:border-b-0 ${mov.status === 'canceled' ? 'text-red-500' : ''}`}>
                                                             <div className="flex items-center gap-2">
                                                                 {mov.type === 'sale' ? <span className={mov.status === 'canceled' ? 'font-bold' : 'text-green-500'}>{mov.status === 'canceled' ? 'Venta Cancelada' : 'Venta'}</span> : <span className="text-red-500">Gasto</span>}
-                                                                <p className="text-gray-600">{mov.type === 'sale' ? mov.cancellationReason || mov.items.map(i => i.fullName).join(', ') : mov.description}</p>
+                                                                <div className="text-gray-600">{mov.type === 'sale' ? renderSaleItems(mov.items) : mov.description}</div>
                                                             </div>
                                                             <div className="flex items-center gap-4">
                                                                 <p className={`font-bold ${mov.status === 'canceled' ? 'text-red-500' : mov.type === 'sale' ? 'text-green-600' : 'text-red-500'}`}>
@@ -213,7 +225,7 @@ const VentasPage = () => {
                                     completedSales.map(sale => (
                                         <tr key={sale.id} className={`border-b transition-colors duration-1000 ${highlightedSaleId === sale.id ? 'bg-blue-100' : ''} ${sale.status === 'canceled' ? 'bg-red-50 text-gray-500' : 'hover:bg-gray-50'}`}>
                                             <td className="p-4 whitespace-nowrap">{formatDate(sale.date)}</td>
-                                            <td className="p-4 text-sm">{sale.items.map(item => item.fullName).join(', ')}</td>
+                                            <td className="p-4">{renderSaleItems(sale.items)}</td>
                                             <td className="p-4 capitalize">{sale.paymentMethod}</td>
                                             <td className="p-4 font-bold">${formatNumber(sale.finalAmount)}</td>
                                             <td className="p-4">
@@ -249,4 +261,3 @@ const VentasPage = () => {
 };
 
 export default VentasPage;
-

@@ -100,18 +100,6 @@ const InventoryPage = () => {
         return groups;
     }, [products]);
 
-    useEffect(() => {
-        // Abrir todas las secciones al filtrar
-        const newOpenSections = {};
-        for (const brand in groupedProducts) {
-            newOpenSections[brand] = true;
-            for (const name in groupedProducts[brand]) {
-                newOpenSections[`${brand}-${name}`] = true;
-            }
-        }
-        setOpenSections(newOpenSections);
-    }, [groupedProducts]);
-
     const handleFilterChange = (e) => {
         const { name, value } = e.target;
         setActiveFilters(prev => ({ ...prev, [name]: value }));

@@ -64,6 +64,18 @@ const SalesReportsPage = () => {
     const productNamesOptions = useMemo(() => [...new Set(allProducts.map(p => p.name))].map(name => ({ value: name, label: name })), [allProducts]);
     const productBrands = useMemo(() => [...new Set(allProducts.map(p => p.brand).filter(Boolean))].map(b => ({ value: b, label: b })), [allProducts]);
 
+    // MODIFICADO: Agrupa las líneas de producto
+    const productLinesOptions = useMemo(() => {
+        const lines = new Set(
+            allProducts
+                .map(p => p.subtype)
+                .filter(Boolean)
+                .map(subtype => subtype.split(' - ')[0].trim())
+        );
+        return [...lines].map(line => ({ value: line, label: line }));
+    }, [allProducts]);
+
+
     const handleApplyFilters = () => fetchReportData();
     const handleSort = (key) => {
         let direction = 'descending';
@@ -117,7 +129,8 @@ const SalesReportsPage = () => {
     const summaryText = `Mostrando reportes para el período: ${format(filters.startDate, 'dd/MM/yyyy')} - ${format(filters.endDate, 'dd/MM/yyyy')}`;
     const activeFiltersText = [
         filters.names.length > 0 ? `Tipos: ${filters.names.map(n => n.label).join(', ')}` : '',
-        filters.brands.length > 0 ? `Marcas: ${filters.brands.map(b => b.label).join(', ')}` : ''
+        filters.brands.length > 0 ? `Marcas: ${filters.brands.map(b => b.label).join(', ')}` : '',
+        filters.lines.length > 0 ? `Líneas: ${filters.lines.map(l => l.label).join(', ')}` : ''
     ].filter(Boolean).join(' | ');
 
 
@@ -127,7 +140,7 @@ const SalesReportsPage = () => {
             <p className="text-sm text-gray-500 mb-6">{summaryText}{activeFiltersText && ` | ${activeFiltersText}`}</p>
 
             <div className="bg-white p-4 rounded-lg shadow mb-6 space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
                     <div>
                         <label className="text-sm font-medium">Rango de Fechas</label>
                         <div className="flex items-center">
@@ -142,6 +155,10 @@ const SalesReportsPage = () => {
                     <div>
                         <label className="text-sm font-medium">Marca</label>
                         <Select isMulti options={productBrands} value={filters.brands} onChange={(selected) => setFilters({ brands: selected })} placeholder="Todas las marcas" />
+                    </div>
+                    <div>
+                        <label className="text-sm font-medium">Línea de Producto</label>
+                        <Select isMulti options={productLinesOptions} value={filters.lines} onChange={(selected) => setFilters({ lines: selected })} placeholder="Todas las líneas" />
                     </div>
                     <div className="flex items-end gap-2">
                         <button onClick={handleApplyFilters} className="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700">Aplicar</button>
