@@ -654,10 +654,10 @@ const processReportData = (sales, productMap) => {
 
 app.post('/api/sales-report-data', async (req, res) => {
     try {
-        const { startDate, endDate, names = [], brands = [], compare } = req.body;
+        const { startDate, endDate, names = [], brands = [], lines = [], compare } = req.body;
 
         const products = await new Promise((resolve, reject) => {
-            db.all('SELECT id, name, brand FROM products', [], (err, rows) => err ? reject(err) : resolve(rows));
+            db.all('SELECT id, name, brand, subtype FROM products', [], (err, rows) => err ? reject(err) : resolve(rows));
         });
         const productMap = new Map(products.map(p => [p.id, p]));
 
@@ -669,19 +669,24 @@ app.post('/api/sales-report-data', async (req, res) => {
             `;
             let params = [start, end];
 
-            if (names.length > 0 || brands.length > 0) {
-                let productFilterClauses = [];
-                let filterParams = [];
+            let productFilterClauses = [];
+            let filterParams = [];
 
-                if (names.length > 0) {
-                    productFilterClauses.push(`p.name IN (${names.map(() => '?').join(',')})`);
-                    filterParams.push(...names);
-                }
-                if (brands.length > 0) {
-                    productFilterClauses.push(`p.brand IN (${brands.map(() => '?').join(',')})`);
-                    filterParams.push(...brands);
-                }
+            if (names.length > 0) {
+                productFilterClauses.push(`p.name IN (${names.map(() => '?').join(',')})`);
+                filterParams.push(...names);
+            }
+            if (brands.length > 0) {
+                productFilterClauses.push(`p.brand IN (${brands.map(() => '?').join(',')})`);
+                filterParams.push(...brands);
+            }
+            if (lines.length > 0) {
+                const lineClauses = lines.map(() => `p.subtype LIKE ?`);
+                productFilterClauses.push(`(${lineClauses.join(' OR ')})`);
+                filterParams.push(...lines.map(line => `${line}%`));
+            }
 
+            if (productFilterClauses.length > 0) {
                 salesQuery += `
                     AND s.id IN (
                         SELECT s2.id
