@@ -583,6 +583,10 @@ app.get('/api/reports/monthly-summary', (req, res) => {
     }).catch(err => res.status(500).json({ error: err.message }));
 });
 
+// ===================================================================================
+// ===== INICIO DEL CÓDIGO CORREGIDO PARA REPORTES DE VENTAS POR FECHA ================
+// ===================================================================================
+
 const processReportData = (sales, productMap, productMapByCode, filters = {}) => {
     const { names = [], brands = [], lines = [] } = filters;
     const hasNameFilter = names.length > 0;
@@ -599,6 +603,18 @@ const processReportData = (sales, productMap, productMapByCode, filters = {}) =>
     const uniqueSales = new Set();
 
     sales.forEach(sale => {
+        // --- CORRECCIÓN CLAVE ---
+        // 1. Creamos un objeto Date a partir del string UTC de la base de datos.
+        const saleUtcDate = new Date(sale.date);
+
+        // 2. Ajustamos la hora para reflejar la zona horaria de Argentina (UTC-3).
+        //    Esto asegura que una venta hecha a las 10 PM del día 1 no se cuente como día 2.
+        saleUtcDate.setUTCHours(saleUtcDate.getUTCHours() - 3);
+
+        // 3. Obtenemos la fecha en formato 'YYYY-MM-DD' de esta nueva fecha ya ajustada.
+        const saleDate = saleUtcDate.toISOString().split('T')[0];
+        // --- FIN DE LA CORRECCIÓN ---
+
         const items = JSON.parse(sale.items);
         let saleHasMatchingItems = false;
 
@@ -623,7 +639,7 @@ const processReportData = (sales, productMap, productMapByCode, filters = {}) =>
                 grossProfit += itemProfit;
                 totalProductsSold += item.quantity;
 
-                const saleDate = sale.date.split('T')[0];
+                // Usamos la 'saleDate' corregida para agrupar los datos del día
                 if (!salesByDay[saleDate]) salesByDay[saleDate] = { sales: 0, items: 0 };
                 salesByDay[saleDate].sales += itemRevenue;
                 salesByDay[saleDate].items += item.quantity;
@@ -670,47 +686,66 @@ app.post('/api/sales-report-data', async (req, res) => {
     try {
         const { startDate: startDateString, endDate: endDateString, names = [], brands = [], lines = [], compare } = req.body;
 
-        const startUTC = `${startDateString}T00:00:00.000Z`;
-        const endUTC = `${endDateString}T23:59:59.999Z`;
-
         const products = await new Promise((resolve, reject) => {
             db.all('SELECT id, name, brand, subtype, code FROM products', [], (err, rows) => err ? reject(err) : resolve(rows));
         });
         const productMap = new Map(products.map(p => [p.id, p]));
         const productMapByCode = new Map(products.filter(p => p.code).map(p => [p.code, p]));
 
-        const getSalesForPeriod = (start, end) => new Promise((resolve, reject) => {
+        // Función que crea el rango UTC exacto para un día en Argentina (ART, UTC-3)
+        const getUtcRangeFromArgentinaDate = (dateString, isEndDate = false) => {
+            // Creamos la fecha especificando explícitamente la zona horaria de Argentina (-03:00)
+            const date = new Date(`${dateString}T00:00:00.000-03:00`);
+            if (isEndDate) {
+                // Para la fecha de fin, calculamos el inicio del día SIGUIENTE para usarlo como límite superior exclusivo.
+                // Ejemplo: si endDate es 01/10, el rango terminará JUSTO ANTES de las 00:00 del 02/10.
+                date.setDate(date.getDate() + 1);
+            }
+            return date.toISOString(); // Lo convertimos a string UTC para la consulta
+        };
+
+        const getSalesForPeriod = (startUtc, endUtc) => new Promise((resolve, reject) => {
+            // La consulta usa >= para el inicio y < para el fin.
+            // Esto es más preciso que BETWEEN y funciona perfecto con los timestamps UTC.
             const salesQuery = `
                 SELECT id, date, finalAmount, items
                 FROM sales
-                WHERE status = 'completed' AND date >= ? AND date <= ?
+                WHERE status = 'completed' AND date >= ? AND date < ?
             `;
-            db.all(salesQuery, [start, end], (err, sales) => err ? reject(err) : resolve(sales));
+            db.all(salesQuery, [startUtc, endUtc], (err, sales) => err ? reject(err) : resolve(sales));
         });
 
-        const currentSales = await getSalesForPeriod(startUTC, endUTC);
+        // --- Período Actual ---
+        const currentRangeStart = getUtcRangeFromArgentinaDate(startDateString);
+        const currentRangeEnd = getUtcRangeFromArgentinaDate(endDateString, true); // true para obtener el día siguiente
+        const currentSales = await getSalesForPeriod(currentRangeStart, currentRangeEnd);
         const currentPeriodData = processReportData(currentSales, productMap, productMapByCode, { names, brands, lines });
 
+        // --- Período de Comparación ---
         let previousPeriodData = null;
         if (compare) {
-            const start = new Date(startUTC);
-            const end = new Date(endUTC);
-            const diff = end.getTime() - start.getTime();
+            const startDate = new Date(currentRangeStart);
+            const endDate = new Date(currentRangeEnd);
+            const diffInMs = endDate.getTime() - startDate.getTime();
 
-            const prevEnd = new Date(start.getTime() - 1);
-            const prevStart = new Date(prevEnd.getTime() - diff);
+            const previousRangeEnd = currentRangeStart; // El fin del período anterior es exactamente el inicio del actual
+            const previousRangeStart = new Date(startDate.getTime() - diffInMs).toISOString();
 
-            const previousSales = await getSalesForPeriod(prevStart.toISOString(), prevEnd.toISOString());
+            const previousSales = await getSalesForPeriod(previousRangeStart, previousRangeEnd);
             previousPeriodData = processReportData(previousSales, productMap, productMapByCode, { names, brands, lines });
         }
 
         res.json({ currentPeriod: currentPeriodData, previousPeriod: previousPeriodData });
 
     } catch (err) {
-        res.status(500).json({ error: "Database error", details: err.message });
+        console.error("Error en /api/sales-report-data:", err);
+        res.status(500).json({ error: "Error en la base de datos", details: err.message });
     }
 });
 
+// ===================================================================================
+// ===== FIN DEL CÓDIGO CORREGIDO ====================================================
+// ===================================================================================
 
 
 // --- Endpoints de CUENTA ---
