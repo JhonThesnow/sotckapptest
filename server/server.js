@@ -888,6 +888,14 @@ app.post('/api/expenses', (req, res) => {
         });
 });
 
+app.delete('/api/expenses/:id', (req, res) => {
+    const { id } = req.params;
+    db.run('DELETE FROM expenses WHERE id = ?', id, function (err) {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ message: 'Gasto eliminado' });
+    });
+});
+
 app.get('/api/payment-methods', (req, res) => {
     db.all("SELECT * FROM payment_methods", [], (err, rows) => {
         if (err) return res.status(500).json({ error: err.message });
@@ -912,21 +920,44 @@ app.get('/api/account/movements', (req, res) => {
     const { startDate, endDate, accountId } = req.query;
     if (!startDate || !endDate) return res.status(400).json({ error: "Fechas de inicio y fin son requeridas." });
 
-    let sql = "SELECT m.*, c.name as categoryName FROM account_movements m LEFT JOIN movement_categories c ON c.id = m.categoryId WHERE m.date >= ? AND m.date <= ?";
     let params = [startDate, endDate];
-
+    let accountFilter = '';
     if (accountId) {
-        sql += " AND m.accountId = ?";
+        accountFilter = "AND accountId = ?";
         params.push(accountId);
     }
-    sql += " ORDER BY m.date DESC";
+
+    const sql = `
+        SELECT id, date, type, amount, reason, categoryId, 'movement' as movementType
+        FROM account_movements
+        WHERE date >= ? AND date <= ? ${accountFilter}
+        UNION ALL
+        SELECT id, date, 'withdrawal' as type, amount, description as reason, categoryId, 'expense' as movementType
+        FROM expenses
+        WHERE date >= ? AND date <= ? ${accountFilter}
+        ORDER BY date DESC
+    `;
+    params.push(startDate, endDate);
+    if (accountId) {
+        params.push(accountId);
+    }
 
     db.all(sql, params, (err, rows) => {
         if (err) return res.status(500).json({ error: err.message });
-        res.json({ data: rows });
+
+        const categoryIds = rows.map(r => r.categoryId).filter(Boolean);
+        if (categoryIds.length === 0) {
+            return res.json({ data: rows });
+        }
+        const categorySql = `SELECT id, name FROM movement_categories WHERE id IN (${categoryIds.map(() => '?').join(',')})`;
+        db.all(categorySql, categoryIds, (catErr, categories) => {
+            if (catErr) return res.status(500).json({ error: catErr.message });
+            const categoryMap = new Map(categories.map(c => [c.id, c.name]));
+            const data = rows.map(r => ({ ...r, categoryName: categoryMap.get(r.categoryId) || 'Sin categoría' }));
+            res.json({ data });
+        });
     });
 });
-
 
 app.listen(PORT, () => {
     console.log(`Servidor corriendo en http://localhost:${PORT}`);

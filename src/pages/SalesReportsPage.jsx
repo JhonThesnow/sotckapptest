@@ -54,6 +54,9 @@ const SalesReportsPage = () => {
     const [activityRange, setActivityRange] = useState('daily');
     const [pieChartDataKey, setPieChartDataKey] = useState('revenueByName');
     const [sortConfig, setSortConfig] = useState({ key: 'quantity', direction: 'descending' });
+    const [productsPage, setProductsPage] = useState(1);
+    const PRODUCTS_PER_PAGE = 5;
+
 
     useEffect(() => {
         // Traemos la lista completa de productos para los filtros
@@ -99,6 +102,10 @@ const SalesReportsPage = () => {
         });
         return sortableItems;
     }, [reportData, sortConfig]);
+
+    const totalProductsPages = Math.ceil(sortedProducts.length / PRODUCTS_PER_PAGE);
+    const paginatedProducts = sortedProducts.slice((productsPage - 1) * PRODUCTS_PER_PAGE, productsPage * PRODUCTS_PER_PAGE);
+
 
     const activityData = useMemo(() => {
         if (!reportData?.currentPeriod?.salesByDay) return [];
@@ -229,9 +236,9 @@ const SalesReportsPage = () => {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {sortedProducts.map((product, index) => (
+                                    {paginatedProducts.map((product, index) => (
                                         <tr key={product.name} className="border-b hover:bg-gray-50">
-                                            <td className="p-2">{index + 1}</td>
+                                            <td className="p-2">{(productsPage - 1) * PRODUCTS_PER_PAGE + index + 1}</td>
                                             <td className="p-2 font-medium">{product.name}</td>
                                             <td className="p-2">{formatNumber(product.quantity)}</td>
                                             <td className="p-2">${formatNumber(product.revenue)}</td>
@@ -241,6 +248,13 @@ const SalesReportsPage = () => {
                                 </tbody>
                             </table>
                         </div>
+                        {totalProductsPages > 1 && (
+                            <div className="flex justify-center mt-4">
+                                <button onClick={() => setProductsPage(p => Math.max(1, p - 1))} disabled={productsPage === 1} className="px-4 py-2 mx-1 bg-white border rounded">Anterior</button>
+                                <span className="px-4 py-2">Página {productsPage} de {totalProductsPages}</span>
+                                <button onClick={() => setProductsPage(p => p + 1)} disabled={productsPage === totalProductsPages} className="px-4 py-2 mx-1 bg-white border rounded">Siguiente</button>
+                            </div>
+                        )}
                     </div>
                 </>
             )}

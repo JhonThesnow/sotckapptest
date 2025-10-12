@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import useSalesStore from '../store/useSalesStore';
+import useAccountStore from '../store/useAccountStore';
 import { FiX, FiTrash, FiEdit, FiRotateCcw, FiAlertTriangle, FiTag } from 'react-icons/fi';
 import CompleteSaleModal from '../components/CompleteSaleModal';
 import ApplyTaxModal from '../components/ApplyTaxModal';
@@ -8,7 +9,8 @@ import CancelSaleModal from '../components/CancelSaleModal';
 import { formatNumber } from '../utils/formatting';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
-import { startOfMonth, endOfMonth } from 'date-fns';
+import { startOfMonth, endOfMonth, format } from 'date-fns';
+import { es } from 'date-fns/locale';
 
 const VentasPage = () => {
     const [activeTab, setActiveTab] = useState('a-cobrar');
@@ -24,15 +26,30 @@ const VentasPage = () => {
         deleteCompletedSale, monthlySummary, fetchSummary, addExpense, deleteExpense,
     } = useSalesStore();
 
+    const { accounts, categories, fetchAccounts, fetchCategories } = useAccountStore();
+
     const [startDate, setStartDate] = useState(startOfMonth(new Date()));
     const [endDate, setEndDate] = useState(endOfMonth(new Date()));
     const [showExpenseForm, setShowExpenseForm] = useState(false);
     const [expenseDescription, setExpenseDescription] = useState('');
     const [expenseAmount, setExpenseAmount] = useState('');
+    const [expenseAccountId, setExpenseAccountId] = useState('');
+    const [expenseCategoryId, setExpenseCategoryId] = useState('');
+
+    // State for pagination in history
+    const [historyPage, setHistoryPage] = useState(1);
+    const [selectedMonth, setSelectedMonth] = useState(format(new Date(), 'yyyy-MM'));
+
+    // State for pagination in daily breakdown
+    const [dailyPage, setDailyPage] = useState(1);
+    const DAILY_ITEMS_PER_PAGE = 10;
+
 
     useEffect(() => {
         fetchAllSales();
-    }, [fetchAllSales]);
+        fetchAccounts();
+        fetchCategories();
+    }, [fetchAllSales, fetchAccounts, fetchCategories]);
 
     useEffect(() => {
         if (activeTab === 'info') {
@@ -62,9 +79,20 @@ const VentasPage = () => {
 
     const handleExpenseSubmit = async (e) => {
         e.preventDefault();
-        await addExpense({ description: expenseDescription, amount: parseFloat(expenseAmount) });
+        if (!expenseAccountId || !expenseCategoryId) {
+            alert('Por favor, selecciona una cuenta y una categoría para el gasto.');
+            return;
+        }
+        await addExpense({
+            description: expenseDescription,
+            amount: parseFloat(expenseAmount),
+            accountId: parseInt(expenseAccountId, 10),
+            categoryId: parseInt(expenseCategoryId, 10),
+        });
         setExpenseDescription('');
         setExpenseAmount('');
+        setExpenseAccountId('');
+        setExpenseCategoryId('');
         setShowExpenseForm(false);
     };
 
@@ -84,6 +112,13 @@ const VentasPage = () => {
     };
 
     const dailyMovements = monthlySummary ? groupMovementsByDay(monthlySummary.sales, monthlySummary.expenses) : {};
+    const dailyMovementsDays = Object.keys(dailyMovements);
+    const paginatedDailyMovementsDays = useMemo(() => {
+        const start = (dailyPage - 1) * DAILY_ITEMS_PER_PAGE;
+        const end = start + DAILY_ITEMS_PER_PAGE;
+        return dailyMovementsDays.slice(start, end);
+    }, [dailyMovementsDays, dailyPage]);
+
 
     const toggleDay = (day) => setOpenDays(prev => ({ ...prev, [day]: !prev[day] }));
 
@@ -98,6 +133,24 @@ const VentasPage = () => {
             </ul>
         );
     };
+    // Group sales by month for the history tab
+    const salesByMonth = useMemo(() => {
+        return completedSales.reduce((acc, sale) => {
+            const month = format(new Date(sale.date), 'yyyy-MM');
+            if (!acc[month]) {
+                acc[month] = [];
+            }
+            acc[month].push(sale);
+            return acc;
+        }, {});
+    }, [completedSales]);
+
+    const availableMonths = Object.keys(salesByMonth).sort().reverse();
+
+    const salesForSelectedMonth = salesByMonth[selectedMonth] || [];
+    const historyPages = Math.ceil(salesForSelectedMonth.length / 5);
+    const paginatedHistory = salesForSelectedMonth.slice((historyPage - 1) * 5, historyPage * 5);
+
 
     return (
         <div className="p-4 md:p-6 bg-gray-50 min-h-full">
@@ -164,6 +217,18 @@ const VentasPage = () => {
                             <form onSubmit={handleExpenseSubmit} className="bg-white p-4 rounded-lg shadow mb-6 flex flex-col md:flex-row gap-4 items-end">
                                 <div className="flex-grow"><label className="text-sm">Descripción</label><input value={expenseDescription} onChange={e => setExpenseDescription(e.target.value)} className="p-2 border rounded w-full" required /></div>
                                 <div className="flex-grow"><label className="text-sm">Monto</label><input type="number" value={expenseAmount} onChange={e => setExpenseAmount(e.target.value)} className="p-2 border rounded w-full" required /></div>
+                                <div className="flex-grow"><label className="text-sm">Cuenta</label>
+                                    <select value={expenseAccountId} onChange={e => setExpenseAccountId(e.target.value)} className="p-2 border rounded w-full" required>
+                                        <option value="">Seleccionar cuenta</option>
+                                        {accounts.map(acc => <option key={acc.id} value={acc.id}>{acc.name}</option>)}
+                                    </select>
+                                </div>
+                                <div className="flex-grow"><label className="text-sm">Categoría</label>
+                                    <select value={expenseCategoryId} onChange={e => setExpenseCategoryId(e.target.value)} className="p-2 border rounded w-full" required>
+                                        <option value="">Seleccionar categoría</option>
+                                        {categories.filter(c => c.type === 'withdrawal').map(cat => <option key={cat.id} value={cat.id}>{cat.name}</option>)}
+                                    </select>
+                                </div>
                                 <button type="submit" className="bg-blue-600 text-white py-2 px-4 rounded w-full md:w-auto">Guardar</button>
                             </form>
                         )}
@@ -177,7 +242,7 @@ const VentasPage = () => {
                                 </div>
                                 <h3 className="text-xl font-bold mb-4">Desglose Diario</h3>
                                 <div className="space-y-2">
-                                    {Object.keys(dailyMovements).map(day => (
+                                    {paginatedDailyMovementsDays.map(day => (
                                         <div key={day} className="bg-white rounded-lg shadow-sm">
                                             <button onClick={() => toggleDay(day)} className="w-full p-3 font-semibold text-left flex justify-between"><span>{day}</span><span>{openDays[day] ? '-' : '+'}</span></button>
                                             {openDays[day] && (
@@ -201,12 +266,26 @@ const VentasPage = () => {
                                         </div>
                                     ))}
                                 </div>
+                                {dailyMovementsDays.length > DAILY_ITEMS_PER_PAGE && (
+                                    <div className="flex justify-center mt-4">
+                                        <button onClick={() => setDailyPage(p => Math.max(1, p - 1))} disabled={dailyPage === 1} className="px-4 py-2 mx-1 bg-white border rounded">Anterior</button>
+                                        <span className="px-4 py-2">Página {dailyPage} de {Math.ceil(dailyMovementsDays.length / DAILY_ITEMS_PER_PAGE)}</span>
+                                        <button onClick={() => setDailyPage(p => p + 1)} disabled={dailyPage * DAILY_ITEMS_PER_PAGE >= dailyMovementsDays.length} className="px-4 py-2 mx-1 bg-white border rounded">Siguiente</button>
+                                    </div>
+                                )}
                             </div>
                         )}
                     </div>
                 )}
                 {activeTab === 'historial' && (
                     <div className="bg-white rounded-lg shadow overflow-x-auto">
+                        <div className="p-4">
+                            <select value={selectedMonth} onChange={e => { setSelectedMonth(e.target.value); setHistoryPage(1); }} className="p-2 border rounded">
+                                {availableMonths.map(month => (
+                                    <option key={month} value={month}>{format(new Date(month + '-02'), 'MMMM yyyy', { locale: es })}</option>
+                                ))}
+                            </select>
+                        </div>
                         <table className="w-full text-left">
                             <thead className="bg-gray-100">
                                 <tr>
@@ -221,8 +300,8 @@ const VentasPage = () => {
                             <tbody>
                                 {loading && !completedSales.length ? (
                                     <tr><td colSpan="6" className="text-center p-10">Cargando...</td></tr>
-                                ) : completedSales.length > 0 ? (
-                                    completedSales.map(sale => (
+                                ) : paginatedHistory.length > 0 ? (
+                                    paginatedHistory.map(sale => (
                                         <tr key={sale.id} className={`border-b transition-colors duration-1000 ${highlightedSaleId === sale.id ? 'bg-blue-100' : ''} ${sale.status === 'canceled' ? 'bg-red-50 text-gray-500' : 'hover:bg-gray-50'}`}>
                                             <td className="p-4 whitespace-nowrap">{formatDate(sale.date)}</td>
                                             <td className="p-4">{renderSaleItems(sale.items)}</td>
@@ -249,10 +328,17 @@ const VentasPage = () => {
                                         </tr>
                                     ))
                                 ) : (
-                                    <tr><td colSpan="6" className="text-center p-10 text-gray-500">No hay ventas en el historial.</td></tr>
+                                    <tr><td colSpan="6" className="text-center p-10 text-gray-500">No hay ventas en el historial para este mes.</td></tr>
                                 )}
                             </tbody>
                         </table>
+                        {historyPages > 1 && (
+                            <div className="p-4 flex justify-center">
+                                <button onClick={() => setHistoryPage(p => Math.max(1, p - 1))} disabled={historyPage === 1} className="px-4 py-2 mx-1 bg-white border rounded">Anterior</button>
+                                <span className="px-4 py-2">Página {historyPage} de {historyPages}</span>
+                                <button onClick={() => setHistoryPage(p => p + 1)} disabled={historyPage === historyPages} className="px-4 py-2 mx-1 bg-white border rounded">Siguiente</button>
+                            </div>
+                        )}
                     </div>
                 )}
             </div>

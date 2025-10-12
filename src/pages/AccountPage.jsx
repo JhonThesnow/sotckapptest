@@ -278,7 +278,7 @@ const AccountPage = () => {
                             movements.length > 0 ? (
                                 <div className="divide-y divide-gray-200">
                                     {movements.map(mov => (
-                                        <div key={mov.id} className="p-4 flex flex-col sm:flex-row justify-between sm:items-center group">
+                                        <div key={`${mov.movementType}-${mov.id}`} className="p-4 flex flex-col sm:flex-row justify-between sm:items-center group">
                                             <div className="flex items-center gap-4">
                                                 <div className={`p-3 rounded-full ${mov.type === 'deposit' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>
                                                     {mov.type === 'deposit' ? <FiTrendingUp /> : <FiTrendingDown />}
@@ -292,10 +292,12 @@ const AccountPage = () => {
                                                 <p className={`font-bold text-lg ${mov.type === 'deposit' ? 'text-green-600' : 'text-red-600'}`}>
                                                     {mov.type === 'deposit' ? '+' : '-'}${formatNumber(mov.amount)}
                                                 </p>
-                                                <div className="opacity-0 group-hover:opacity-100 transition-opacity flex">
-                                                    <button onClick={() => setMovementToEdit(mov)} title="Editar" className="p-2 text-gray-500 hover:text-blue-600"><FiEdit /></button>
-                                                    <button onClick={() => handleDeleteMovement(mov.id)} title="Eliminar" className="p-2 text-gray-500 hover:text-red-600"><FiTrash /></button>
-                                                </div>
+                                                {mov.movementType === 'movement' && (
+                                                    <div className="opacity-0 group-hover:opacity-100 transition-opacity flex">
+                                                        <button onClick={() => setMovementToEdit(mov)} title="Editar" className="p-2 text-gray-500 hover:text-blue-600"><FiEdit /></button>
+                                                        <button onClick={() => handleDeleteMovement(mov.id)} title="Eliminar" className="p-2 text-gray-500 hover:text-red-600"><FiTrash /></button>
+                                                    </div>
+                                                )}
                                             </div>
                                         </div>
                                     ))}
@@ -308,6 +310,7 @@ const AccountPage = () => {
                             )}
                     </div>
                 )}
+
 
                 {activeTab === 'closings' && (
                     <div className="bg-white rounded-lg shadow overflow-x-auto">

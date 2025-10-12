@@ -274,6 +274,8 @@ const useSalesStore = create((set, get) => ({
                 body: JSON.stringify(expenseData),
             });
             if (!response.ok) throw new Error('Falló al agregar el gasto');
+            const { startDate, endDate } = get().monthlySummary;
+            get().fetchSummary(startDate, endDate);
             useAccountStore.getState().fetchDataForCurrentState();
         } catch (e) {
             console.error("Error adding expense:", e);
@@ -285,6 +287,8 @@ const useSalesStore = create((set, get) => ({
         try {
             const response = await fetch(`${API_URL}/expenses/${expenseId}`, { method: 'DELETE' });
             if (!response.ok) throw new Error('Falló al eliminar el gasto');
+            const { startDate, endDate } = get().monthlySummary;
+            get().fetchSummary(startDate, endDate);
             useAccountStore.getState().fetchDataForCurrentState();
         } catch (e) {
             console.error("Error deleting expense:", e);
