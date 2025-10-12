@@ -3,25 +3,30 @@ import Select from 'react-select';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area } from 'recharts';
-import { format, startOfMonth, endOfMonth } from 'date-fns';
+import { format, startOfMonth, endOfMonth, endOfDay } from 'date-fns';
 import { es } from 'date-fns/locale';
 import useSalesReportsStore from '../store/useSalesReportsStore';
 import useProductStore from '../store/useProductStore';
 import { formatNumber } from '../utils/formatting';
 import { FiTrendingUp, FiTrendingDown } from 'react-icons/fi';
 
-const StatCard = ({ title, value, previousValue }) => {
+const StatCard = ({ title, value, currentValue, previousValue }) => {
     const percentageChange = useMemo(() => {
-        if (previousValue === null || previousValue === undefined || previousValue === 0) return null;
-        return ((value - previousValue) / previousValue) * 100;
-    }, [value, previousValue]);
+        if (previousValue === null || previousValue === undefined || typeof currentValue !== 'number' || typeof previousValue !== 'number') {
+            return null;
+        }
+        if (previousValue === 0) {
+            return currentValue > 0 ? Infinity : 0;
+        }
+        return ((currentValue - previousValue) / previousValue) * 100;
+    }, [currentValue, previousValue]);
 
     return (
         <div className="bg-white p-6 rounded-lg shadow">
             <p className="text-gray-500 text-sm font-medium">{title}</p>
             <div className="flex items-baseline gap-2">
                 <p className="text-2xl font-bold text-gray-800">{value}</p>
-                {percentageChange !== null && (
+                {percentageChange !== null && isFinite(percentageChange) && (
                     <span className={`flex items-center text-sm font-bold ${percentageChange >= 0 ? 'text-green-500' : 'text-red-500'}`}>
                         {percentageChange >= 0 ? <FiTrendingUp /> : <FiTrendingDown />}
                         {Math.abs(percentageChange).toFixed(1)}%
@@ -31,6 +36,7 @@ const StatCard = ({ title, value, previousValue }) => {
         </div>
     );
 };
+
 
 const CustomTooltip = ({ active, payload, label }) => {
     if (active && payload && payload.length) {
@@ -152,7 +158,7 @@ const SalesReportsPage = () => {
                         <label className="text-sm font-medium">Rango de Fechas</label>
                         <div className="flex items-center">
                             <DatePicker selected={filters.startDate} onChange={(date) => setFilters({ startDate: date })} selectsStart startDate={filters.startDate} endDate={filters.endDate} className="w-full p-2 border rounded-l-md" dateFormat="dd/MM/yyyy" />
-                            <DatePicker selected={filters.endDate} onChange={(date) => setFilters({ endDate: date })} selectsEnd startDate={filters.startDate} endDate={filters.endDate} minDate={filters.startDate} className="w-full p-2 border rounded-r-md" dateFormat="dd/MM/yyyy" />
+                            <DatePicker selected={filters.endDate} onChange={(date) => setFilters({ endDate: endOfDay(date) })} selectsEnd startDate={filters.startDate} endDate={filters.endDate} minDate={filters.startDate} className="w-full p-2 border rounded-r-md" dateFormat="dd/MM/yyyy" />
                         </div>
                     </div>
                     <div>
@@ -182,11 +188,36 @@ const SalesReportsPage = () => {
             {!loading && reportData?.currentPeriod && (
                 <>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
-                        <StatCard title="Total de Ingresos" value={`$${formatNumber(reportData.currentPeriod.summary.totalRevenue)}`} previousValue={reportData.previousPeriod?.summary.totalRevenue} />
-                        <StatCard title="Ganancia Bruta" value={`$${formatNumber(reportData.currentPeriod.summary.grossProfit)}`} previousValue={reportData.previousPeriod?.summary.grossProfit} />
-                        <StatCard title="Margen Ganancia" value={`${reportData.currentPeriod.summary.profitMargin.toFixed(1)}%`} previousValue={reportData.previousPeriod?.summary.profitMargin} />
-                        <StatCard title="Total Productos Vendidos" value={formatNumber(reportData.currentPeriod.summary.totalProductsSold)} previousValue={reportData.previousPeriod?.summary.totalProductsSold} />
-                        <StatCard title="Total de Ventas" value={formatNumber(reportData.currentPeriod.summary.totalSales)} previousValue={reportData.previousPeriod?.summary.totalSales} />
+                        <StatCard
+                            title="Total de Ingresos"
+                            value={`$${formatNumber(reportData.currentPeriod.summary.totalRevenue)}`}
+                            currentValue={reportData.currentPeriod.summary.totalRevenue}
+                            previousValue={reportData.previousPeriod?.summary.totalRevenue}
+                        />
+                        <StatCard
+                            title="Ganancia Bruta"
+                            value={`$${formatNumber(reportData.currentPeriod.summary.grossProfit)}`}
+                            currentValue={reportData.currentPeriod.summary.grossProfit}
+                            previousValue={reportData.previousPeriod?.summary.grossProfit}
+                        />
+                        <StatCard
+                            title="Margen Ganancia"
+                            value={`${reportData.currentPeriod.summary.profitMargin.toFixed(1)}%`}
+                            currentValue={reportData.currentPeriod.summary.profitMargin}
+                            previousValue={reportData.previousPeriod?.summary.profitMargin}
+                        />
+                        <StatCard
+                            title="Total Productos Vendidos"
+                            value={formatNumber(reportData.currentPeriod.summary.totalProductsSold)}
+                            currentValue={reportData.currentPeriod.summary.totalProductsSold}
+                            previousValue={reportData.previousPeriod?.summary.totalProductsSold}
+                        />
+                        <StatCard
+                            title="Total de Ventas"
+                            value={formatNumber(reportData.currentPeriod.summary.totalSales)}
+                            currentValue={reportData.currentPeriod.summary.totalSales}
+                            previousValue={reportData.previousPeriod?.summary.totalSales}
+                        />
                     </div>
 
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">

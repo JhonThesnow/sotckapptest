@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { startOfMonth, endOfMonth } from 'date-fns';
+import { startOfMonth, endOfMonth, format } from 'date-fns';
 
 const API_URL = '/api';
 
@@ -44,8 +44,9 @@ const useSalesReportsStore = create((set, get) => ({
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    startDate: filters.startDate.toISOString(),
-                    endDate: filters.endDate.toISOString(),
+                    // Enviamos las fechas como strings YYYY-MM-DD para evitar problemas de timezone
+                    startDate: format(filters.startDate, 'yyyy-MM-dd'),
+                    endDate: format(filters.endDate, 'yyyy-MM-dd'),
                     names: filters.names ? filters.names.map(n => n.value) : [],
                     brands: filters.brands ? filters.brands.map(b => b.value) : [],
                     lines: filters.lines ? filters.lines.map(l => l.value) : [], // Enviar líneas

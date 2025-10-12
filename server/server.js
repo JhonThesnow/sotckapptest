@@ -583,8 +583,12 @@ app.get('/api/reports/monthly-summary', (req, res) => {
     }).catch(err => res.status(500).json({ error: err.message }));
 });
 
-// Helper function to process sales data for a given period
-const processReportData = (sales, productMap) => {
+const processReportData = (sales, productMap, productMapByCode, filters = {}) => {
+    const { names = [], brands = [], lines = [] } = filters;
+    const hasNameFilter = names.length > 0;
+    const hasBrandFilter = brands.length > 0;
+    const hasLineFilter = lines.length > 0;
+
     let totalRevenue = 0;
     let totalProductsSold = 0;
     let grossProfit = 0;
@@ -592,56 +596,66 @@ const processReportData = (sales, productMap) => {
     const productData = {};
     const revenueByBrand = {};
     const revenueByName = {};
+    const uniqueSales = new Set();
 
     sales.forEach(sale => {
-        const saleDate = sale.date.split('T')[0];
-        totalRevenue += sale.finalAmount;
-
-        if (!salesByDay[saleDate]) {
-            salesByDay[saleDate] = { sales: 0, items: 0 };
-        }
-        salesByDay[saleDate].sales += sale.finalAmount;
-
         const items = JSON.parse(sale.items);
+        let saleHasMatchingItems = false;
+
         items.forEach(item => {
-            if (!item.productId) return; // Skip quick sale items
+            if (!item.productId) return;
 
-            totalProductsSold += item.quantity;
-            salesByDay[saleDate].items += item.quantity;
+            const productInfo = productMap.get(item.productId) || productMapByCode.get(item.productId);
+            if (!productInfo) return;
 
-            const itemRevenue = item.unitPrice * item.quantity;
-            const itemCost = (item.purchasePrice || 0) * item.quantity;
-            const itemProfit = itemRevenue - itemCost;
-            grossProfit += itemProfit;
+            const nameMatch = !hasNameFilter || names.includes(productInfo.name);
+            const brandMatch = !hasBrandFilter || brands.includes(productInfo.brand);
+            const lineMatch = !hasLineFilter || lines.some(line => productInfo.subtype && productInfo.subtype.startsWith(line));
 
-            const productInfo = productMap.get(item.productId);
+            if (nameMatch && brandMatch && lineMatch) {
+                saleHasMatchingItems = true;
 
-            if (!productData[item.fullName]) {
-                productData[item.fullName] = { name: item.fullName, quantity: 0, revenue: 0, profit: 0 };
+                const itemRevenue = item.unitPrice * item.quantity;
+                const itemCost = (item.purchasePrice || 0) * item.quantity;
+                const itemProfit = itemRevenue - itemCost;
+
+                totalRevenue += itemRevenue;
+                grossProfit += itemProfit;
+                totalProductsSold += item.quantity;
+
+                const saleDate = sale.date.split('T')[0];
+                if (!salesByDay[saleDate]) salesByDay[saleDate] = { sales: 0, items: 0 };
+                salesByDay[saleDate].sales += itemRevenue;
+                salesByDay[saleDate].items += item.quantity;
+
+                if (!productData[item.fullName]) {
+                    productData[item.fullName] = { name: item.fullName, quantity: 0, revenue: 0, profit: 0 };
+                }
+                productData[item.fullName].quantity += item.quantity;
+                productData[item.fullName].revenue += itemRevenue;
+                productData[item.fullName].profit += itemProfit;
+
+                const brand = productInfo.brand || 'Sin Marca';
+                if (!revenueByBrand[brand]) revenueByBrand[brand] = 0;
+                revenueByBrand[brand] += itemRevenue;
+
+                if (!revenueByName[productInfo.name]) revenueByName[productInfo.name] = 0;
+                revenueByName[productInfo.name] += itemRevenue;
             }
-            productData[item.fullName].quantity += item.quantity;
-            productData[item.fullName].revenue += itemRevenue;
-            productData[item.fullName].profit += itemProfit;
-
-            const brand = productInfo?.brand || 'Sin Marca';
-            const name = productInfo?.name || 'Varios';
-
-            if (!revenueByBrand[brand]) revenueByBrand[brand] = 0;
-            revenueByBrand[brand] += itemRevenue;
-
-            if (!revenueByName[name]) revenueByName[name] = 0;
-            revenueByName[name] += itemRevenue;
         });
+
+        if (saleHasMatchingItems) {
+            uniqueSales.add(sale.id);
+        }
     });
 
-    const topProducts = Object.values(productData)
-        .sort((a, b) => b.quantity - a.quantity);
+    const topProducts = Object.values(productData).sort((a, b) => b.quantity - a.quantity);
 
     return {
         summary: {
             totalRevenue,
             totalProductsSold,
-            totalSales: sales.length,
+            totalSales: uniqueSales.size,
             grossProfit,
             profitMargin: totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0,
         },
@@ -654,65 +668,40 @@ const processReportData = (sales, productMap) => {
 
 app.post('/api/sales-report-data', async (req, res) => {
     try {
-        const { startDate, endDate, names = [], brands = [], lines = [], compare } = req.body;
+        const { startDate: startDateString, endDate: endDateString, names = [], brands = [], lines = [], compare } = req.body;
+
+        const startUTC = `${startDateString}T00:00:00.000Z`;
+        const endUTC = `${endDateString}T23:59:59.999Z`;
 
         const products = await new Promise((resolve, reject) => {
-            db.all('SELECT id, name, brand, subtype FROM products', [], (err, rows) => err ? reject(err) : resolve(rows));
+            db.all('SELECT id, name, brand, subtype, code FROM products', [], (err, rows) => err ? reject(err) : resolve(rows));
         });
         const productMap = new Map(products.map(p => [p.id, p]));
+        const productMapByCode = new Map(products.filter(p => p.code).map(p => [p.code, p]));
 
         const getSalesForPeriod = (start, end) => new Promise((resolve, reject) => {
-            let salesQuery = `
-                SELECT s.id, s.date, s.finalAmount, s.items
-                FROM sales s
-                WHERE s.status = 'completed' AND s.date >= ? AND s.date <= ?
+            const salesQuery = `
+                SELECT id, date, finalAmount, items
+                FROM sales
+                WHERE status = 'completed' AND date >= ? AND date <= ?
             `;
-            let params = [start, end];
-
-            let productFilterClauses = [];
-            let filterParams = [];
-
-            if (names.length > 0) {
-                productFilterClauses.push(`p.name IN (${names.map(() => '?').join(',')})`);
-                filterParams.push(...names);
-            }
-            if (brands.length > 0) {
-                productFilterClauses.push(`p.brand IN (${brands.map(() => '?').join(',')})`);
-                filterParams.push(...brands);
-            }
-            if (lines.length > 0) {
-                const lineClauses = lines.map(() => `p.subtype LIKE ?`);
-                productFilterClauses.push(`(${lineClauses.join(' OR ')})`);
-                filterParams.push(...lines.map(line => `${line}%`));
-            }
-
-            if (productFilterClauses.length > 0) {
-                salesQuery += `
-                    AND s.id IN (
-                        SELECT s2.id
-                        FROM sales s2, json_each(s2.items) AS item
-                        JOIN products p ON p.id = CAST(json_extract(item.value, '$.productId') AS INTEGER)
-                        WHERE ${productFilterClauses.join(' AND ')}
-                    )
-                `;
-                params.push(...filterParams);
-            }
-
-            db.all(salesQuery, params, (err, sales) => err ? reject(err) : resolve(sales));
+            db.all(salesQuery, [start, end], (err, sales) => err ? reject(err) : resolve(sales));
         });
 
-        const currentSales = await getSalesForPeriod(startDate, endDate);
-        const currentPeriodData = processReportData(currentSales, productMap);
+        const currentSales = await getSalesForPeriod(startUTC, endUTC);
+        const currentPeriodData = processReportData(currentSales, productMap, productMapByCode, { names, brands, lines });
 
         let previousPeriodData = null;
         if (compare) {
-            const start = new Date(startDate);
-            const end = new Date(endDate);
+            const start = new Date(startUTC);
+            const end = new Date(endUTC);
             const diff = end.getTime() - start.getTime();
-            const prevStart = new Date(start.getTime() - diff - 1);
+
             const prevEnd = new Date(start.getTime() - 1);
+            const prevStart = new Date(prevEnd.getTime() - diff);
+
             const previousSales = await getSalesForPeriod(prevStart.toISOString(), prevEnd.toISOString());
-            previousPeriodData = processReportData(previousSales, productMap);
+            previousPeriodData = processReportData(previousSales, productMap, productMapByCode, { names, brands, lines });
         }
 
         res.json({ currentPeriod: currentPeriodData, previousPeriod: previousPeriodData });
@@ -721,6 +710,7 @@ app.post('/api/sales-report-data', async (req, res) => {
         res.status(500).json({ error: "Database error", details: err.message });
     }
 });
+
 
 
 // --- Endpoints de CUENTA ---
@@ -834,7 +824,7 @@ app.get('/api/cash-closings', (req, res) => {
     }
 
     let sql = `
-        SELECT cc.*, a.name as accountName 
+        SELECT cc.*, a.name as accountName
         FROM cash_closings cc
         JOIN accounts a ON a.id = cc.accountId
         WHERE cc.date >= ? AND cc.date <= ?`;

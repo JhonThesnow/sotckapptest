@@ -91,7 +91,7 @@ const InventoryPage = () => {
     const groupedProducts = useMemo(() => {
         const groups = {};
         products.forEach(product => {
-            const brand = (product.brand || 'Sin Marca').trim();
+            const brand = product.brand ? product.brand.trim() : 'Sin Marca';
             const name = product.name;
             if (!groups[brand]) groups[brand] = {};
             if (!groups[brand][name]) groups[brand][name] = [];

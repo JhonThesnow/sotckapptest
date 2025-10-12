@@ -58,7 +58,7 @@ const SalesPage = () => {
 
 
     const brands = useMemo(() => {
-        const brandSet = new Set(allProducts.map(p => p.brand || 'Sin Marca'));
+        const brandSet = new Set(allProducts.map(p => p.brand).filter(Boolean));
         return ['Todas', ...Array.from(brandSet)];
     }, [allProducts]);
 
@@ -69,7 +69,7 @@ const SalesPage = () => {
         }
         const typeSet = new Set(
             allProducts
-                .filter(p => (p.brand || 'Sin Marca') === selectedBrand)
+                .filter(p => p.brand === selectedBrand)
                 .map(p => p.name)
         );
         return ['Todos', ...Array.from(typeSet)];
@@ -233,7 +233,7 @@ const SalesPage = () => {
                     <div className="mb-4">
                         <label className="block text-sm font-medium text-gray-700 mb-1">Método de Pago (Opcional)</label>
                         <select value={currentPaymentMethod || ''} onChange={(e) => setCurrentPaymentMethod(e.target.value)} className="p-2 border rounded bg-white w-full">
-                            <option value="">Seleccionar...</option>
+                            <option value="">Seleccionar después...</option>
                             {(paymentMethods || []).map(method => <option key={method.id} value={method.name}>{method.name}</option>)}
                         </select>
                     </div>
