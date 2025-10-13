@@ -132,8 +132,7 @@ const SalesPage = () => {
                             placeholder="Buscar por nombre, código o escanear..."
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
-                            className="w-full pl-10 pr-12 py-3 border rounded-lg text-lg focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
-                            disabled={productsLoading}
+                            className="w-full pl-10 pr-12 py-3 border rounded-lg text-lg focus:ring-blue-500 focus:border-blue-500"
                         />
                         <button onClick={() => setShowScanner(true)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-blue-600 p-1">
                             <FiCamera size={24} />

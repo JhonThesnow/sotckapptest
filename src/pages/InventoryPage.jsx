@@ -100,6 +100,21 @@ const InventoryPage = () => {
         return groups;
     }, [products]);
 
+    useEffect(() => {
+        if (searchTerm && products.length > 0) {
+            const newOpenSections = {};
+            Object.keys(groupedProducts).forEach(brand => {
+                newOpenSections[brand] = true;
+                Object.keys(groupedProducts[brand]).forEach(name => {
+                    newOpenSections[`${brand}-${name}`] = true;
+                });
+            });
+            setOpenSections(newOpenSections);
+        } else if (!searchTerm) {
+            setOpenSections({});
+        }
+    }, [products, searchTerm, groupedProducts]);
+
     const handleFilterChange = (e) => {
         const { name, value } = e.target;
         setActiveFilters(prev => ({ ...prev, [name]: value }));
