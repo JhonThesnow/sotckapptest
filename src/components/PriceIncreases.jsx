@@ -18,7 +18,7 @@ const PriceIncreases = () => {
 
     useEffect(() => {
         if (isHistoryOpen) {
-            fetchPriceIncreaseHistory(currentPage, 5);
+            fetchPriceIncreaseHistory(currentPage, 10);
         }
     }, [currentPage, fetchPriceIncreaseHistory, isHistoryOpen]);
 
@@ -63,7 +63,7 @@ const PriceIncreases = () => {
             });
             setSelectedProducts([]);
             setIncreaseValue('');
-            fetchPriceIncreaseHistory(1, 5);
+            fetchPriceIncreaseHistory(1, 10);
         }
     };
 

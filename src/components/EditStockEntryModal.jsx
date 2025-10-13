@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import useProductStore from '../store/useProductStore';
-import { FiX, FiSave } from 'react-icons/fi';
+import useProductStore from '../store/useProductStore.js';
+import { FiX, FiPlus, FiTrash, FiSave } from 'react-icons/fi';
 
 const EditStockEntryModal = ({ entry, onClose }) => {
-    const { updateStockEntry } = useProductStore();
+    const { updateStockEntry, products: allProducts } = useProductStore();
     const [products, setProducts] = useState([]);
+    const [showAddProduct, setShowAddProduct] = useState(false);
+    const [productToAdd, setProductToAdd] = useState('');
 
     useEffect(() => {
         if (entry) {
@@ -18,6 +20,21 @@ const EditStockEntryModal = ({ entry, onClose }) => {
                 p.id === productId ? { ...p, quantity: parseInt(newQuantity, 10) || 0 } : p
             )
         );
+    };
+
+    const handleRemoveProduct = (productId) => {
+        if (window.confirm('¿Estás seguro de que quieres eliminar este producto del ingreso?')) {
+            setProducts(currentProducts => currentProducts.filter(p => p.id !== productId));
+        }
+    };
+
+    const handleAddProduct = () => {
+        const product = allProducts.find(p => p.id === parseInt(productToAdd, 10));
+        if (product && !products.some(p => p.id === product.id)) {
+            setProducts(currentProducts => [...currentProducts, { ...product, quantity: 1 }]);
+        }
+        setShowAddProduct(false);
+        setProductToAdd('');
     };
 
     const handleSave = () => {
@@ -37,15 +54,39 @@ const EditStockEntryModal = ({ entry, onClose }) => {
                     {products.map(product => (
                         <div key={product.id} className="flex justify-between items-center p-2 bg-gray-100 rounded">
                             <span>{product.name} - {product.subtype}</span>
-                            <input
-                                type="number"
-                                value={product.quantity}
-                                onChange={(e) => handleQuantityChange(product.id, e.target.value)}
-                                className="w-24 p-1 border rounded text-center"
-                            />
+                            <div className="flex items-center gap-2">
+                                <input
+                                    type="number"
+                                    value={product.quantity}
+                                    onChange={(e) => handleQuantityChange(product.id, e.target.value)}
+                                    className="w-24 p-1 border rounded text-center"
+                                />
+                                <button onClick={() => handleRemoveProduct(product.id)} className="text-red-500 hover:text-red-700">
+                                    <FiTrash />
+                                </button>
+                            </div>
                         </div>
                     ))}
                 </div>
+                {showAddProduct ? (
+                    <div className="flex gap-2 mt-4">
+                        <select
+                            value={productToAdd}
+                            onChange={(e) => setProductToAdd(e.target.value)}
+                            className="p-2 border rounded w-full"
+                        >
+                            <option value="">Selecciona un producto...</option>
+                            {allProducts.filter(p => !products.some(ep => ep.id === p.id)).map(p => (
+                                <option key={p.id} value={p.id}>{p.name} - {p.subtype}</option>
+                            ))}
+                        </select>
+                        <button onClick={handleAddProduct} className="py-2 px-4 bg-blue-600 text-white rounded">Agregar</button>
+                    </div>
+                ) : (
+                    <button onClick={() => setShowAddProduct(true)} className="mt-4 flex items-center gap-2 text-sm text-blue-600 hover:underline">
+                        <FiPlus /> Agregar Producto
+                    </button>
+                )}
                 <div className="flex justify-end gap-4 mt-6">
                     <button type="button" onClick={onClose} className="py-2 px-4 bg-gray-200 rounded">Cancelar</button>
                     <button onClick={handleSave} className="py-2 px-4 bg-blue-600 text-white rounded flex items-center gap-2">

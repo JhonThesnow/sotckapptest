@@ -81,7 +81,7 @@ const InventoryPage = () => {
     }, []);
 
     useEffect(() => {
-        fetchProducts({ page: currentPage, ...activeFilters, searchTerm, limit: 15 });
+        fetchProducts({ page: currentPage, ...activeFilters, searchTerm, limit: 10 });
     }, [fetchProducts, currentPage, activeFilters, searchTerm]);
 
     const uniqueBrands = useMemo(() => [...new Set(allProducts.map(p => p.brand).filter(Boolean))].sort(), [allProducts]);
