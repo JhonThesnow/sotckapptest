@@ -31,9 +31,17 @@ const CompleteSaleModal = ({ sale, onClose }) => {
             alert('Por favor, selecciona un método de pago.');
             return;
         }
+
+        // CORRECCIÓN: Asegurar que el totalAmount enviado para la base de datos sea el redondeado
+        // Esto es necesario porque el backend confía en que el finalAmount sea el valor cobrado
+        const finalAmountForDB = finalTotal;
+
         const result = await completeSale(sale.id, {
             paymentMethod,
             finalDiscountPercentage: discountPercentage,
+            // Envía el monto final redondeado o no redondeado, según el método de pago.
+            // Aunque el backend lo calcula, es buena práctica en el frontend para consistencia.
+            finalAmount: finalAmountForDB,
         });
         if (result && result.success) {
             onClose();
@@ -51,7 +59,8 @@ const CompleteSaleModal = ({ sale, onClose }) => {
                 <div className="space-y-4">
                     <div className="p-3 bg-gray-50 rounded-lg">
                         <p className="text-sm text-gray-600">Items: {sale.items.map(i => i.fullName).join(', ')}</p>
-                        <p className="text-right font-semibold">Monto Original: ${formatNumber(sale.totalAmount)}</p>
+                        {/* CORRECCIÓN: Usar sale.subtotal que no lleva descuento inicial */}
+                        <p className="text-right font-semibold">Monto Original: ${formatNumber(sale.subtotal)}</p>
                     </div>
 
                     <div>
@@ -74,6 +83,9 @@ const CompleteSaleModal = ({ sale, onClose }) => {
                                 min="0" max="100"
                             />
                         </div>
+                        {discountPercentage > 0 && (
+                            <p className="text-sm text-red-500 mt-1">Descuento aplicado: -${formatNumber(discountAmount)}</p>
+                        )}
                     </div>
                 </div>
 
@@ -102,4 +114,3 @@ const CompleteSaleModal = ({ sale, onClose }) => {
 };
 
 export default CompleteSaleModal;
-

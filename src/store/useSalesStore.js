@@ -1,126 +1,180 @@
 import { create } from 'zustand';
 import useProductStore from './useProductStore';
 import useAccountStore from './useAccountStore';
-import { roundCash } from '../utils/formatting';
 
-const API_URL = '/api';
+const API_URL = 'http://localhost:3001/api';
+
+// Función auxiliar que mapea el método de pago al ID de cuenta fijo
+const getAccountIdByPaymentMethod = (method) => {
+    switch (method) {
+        case 'Efectivo': return 1; // ID fijo de Caja Principal
+        case 'Débito': return 2; // ID fijo de Débito
+        case 'Crédito': return 3; // ID fijo de Crédito
+        case 'Cuenta DNI': return 4; // ID fijo de Cuenta DNI
+        default: return 1; // Fallback a Caja Principal
+    }
+};
 
 const useSalesStore = create((set, get) => ({
-    // --- STATE ---
-    cart: [],
-    pendingSales: [],
-    completedSales: [],
-    expenses: [],
-    paymentMethods: [],
-    monthlySummary: null,
-    currentPaymentMethod: null,
+    sales: [],
+    pendingSale: null,
     loading: false,
     error: null,
 
-    // --- CART ACTIONS ---
-    addItemToCart: (product) => {
+    // --- Ventas Pendientes (Current Sale) ---
+
+    // Inicia una nueva venta o carga la existente
+    startNewSale: (initialItems = []) => {
+        const newSale = {
+            id: null,
+            items: initialItems,
+            subtotal: 0,
+            discount: 0,
+            totalAmount: 0,
+            status: 'pending'
+        };
+        set({ pendingSale: newSale });
+        get().calculateSaleTotals();
+    },
+
+    addItemToSale: (product, quantity) => {
         set(state => {
-            if (product.id.toString().startsWith('qs-')) {
-                return { cart: [...state.cart, { ...product, id: `qs-${Date.now()}` }] };
+            const currentSale = state.pendingSale || get().startNewSale().pendingSale;
+            const existingItemIndex = currentSale.items.findIndex(item => item.productId === product.id);
+            const salePrice = JSON.parse(product.salePrices || '[]')[0]?.price || 0;
+
+            if (existingItemIndex !== -1) {
+                const updatedItems = currentSale.items.map((item, index) =>
+                    index === existingItemIndex
+                        ? { ...item, quantity: item.quantity + quantity }
+                        : item
+                );
+                currentSale.items = updatedItems;
+            } else {
+                currentSale.items.push({
+                    productId: product.id,
+                    fullName: `${product.name} - ${product.subtype || product.brand}`,
+                    quantity: quantity,
+                    unitPrice: salePrice,
+                    purchasePrice: product.purchasePrice || 0
+                });
             }
-            const itemInCart = state.cart.find((item) => item.id === product.id);
-            if (itemInCart) {
-                if (itemInCart.quantity < product.quantity) {
-                    return {
-                        cart: state.cart.map(item =>
-                            item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
-                        )
-                    };
-                }
-                alert('No hay más stock disponible para este producto.');
-                return {};
-            }
-            if (product.quantity > 0) {
-                return { cart: [...state.cart, { ...product, quantity: 1 }] };
-            }
-            alert('Producto sin stock.');
-            return {};
+
+            get().calculateSaleTotals(currentSale);
+            return { pendingSale: { ...currentSale } };
         });
     },
-    removeItemFromCart: (productId) => {
-        set(state => ({ cart: state.cart.filter((item) => item.id !== productId) }));
-    },
-    updateItemQuantity: (productId, quantity) => {
-        const productInDB = useProductStore.getState().products.find(p => p.id === productId);
-        let newQuantity = parseInt(quantity, 10);
-        if (isNaN(newQuantity) || newQuantity < 1) newQuantity = 1;
 
-        if (productInDB) {
-            if (newQuantity > productInDB.quantity) {
-                alert(`Solo hay ${productInDB.quantity} unidades en stock.`);
-                newQuantity = productInDB.quantity;
-            }
-        }
+    updateItemQuantity: (productId, newQuantity) => {
+        set(state => {
+            if (!state.pendingSale) return state;
+
+            const updatedItems = state.pendingSale.items
+                .map(item =>
+                    item.productId === productId
+                        ? { ...item, quantity: newQuantity }
+                        : item
+                )
+                .filter(item => item.quantity > 0);
+
+            state.pendingSale.items = updatedItems;
+            get().calculateSaleTotals(state.pendingSale);
+            return { pendingSale: { ...state.pendingSale } };
+        });
+    },
+
+    addQuickSaleItem: (name, price) => {
+        set(state => {
+            const currentSale = state.pendingSale || get().startNewSale().pendingSale;
+            const newItem = {
+                productId: `qs-${Date.now()}`, // ID temporal para venta rápida
+                fullName: name,
+                quantity: 1,
+                unitPrice: price,
+                purchasePrice: 0 // No tiene costo de compra asociado
+            };
+
+            currentSale.items.push(newItem);
+            get().calculateSaleTotals(currentSale);
+            return { pendingSale: { ...currentSale } };
+        });
+    },
+
+    calculateSaleTotals: (sale = get().pendingSale) => {
+        if (!sale) return;
+
+        const subtotal = sale.items.reduce((sum, item) => sum + (item.unitPrice * item.quantity), 0);
+        const discountAmount = subtotal * (sale.discount / 100);
+        const totalAmount = subtotal - discountAmount;
+
         set(state => ({
-            cart: state.cart.map(item =>
-                item.id === productId ? { ...item, quantity: newQuantity } : item
-            )
+            pendingSale: {
+                ...sale,
+                subtotal: subtotal,
+                discount: sale.discount, // Mantener el porcentaje de descuento
+                totalAmount: totalAmount,
+            }
         }));
     },
-    clearCart: () => set({ cart: [], error: null, currentPaymentMethod: null }),
-    setCurrentPaymentMethod: (method) => set({ currentPaymentMethod: method }),
 
-    // --- SALES ACTIONS ---
-    createPendingSale: async (saleDetails) => {
-        const { cart } = get();
-        if (cart.length === 0) return { success: false, error: "El carrito está vacío." };
+    applyDiscount: (discountPercentage) => {
+        set(state => ({
+            pendingSale: {
+                ...state.pendingSale,
+                discount: discountPercentage || 0,
+            }
+        }));
+        get().calculateSaleTotals();
+    },
+
+    // Guarda la venta como pendiente en la base de datos
+    savePendingSale: async () => {
+        const sale = get().pendingSale;
+        if (!sale || sale.items.length === 0) return { success: false, error: 'La venta está vacía.' };
+
         set({ loading: true, error: null });
-
-        let finalTotal = saleDetails.totalAmount;
-        if (saleDetails.paymentMethod === 'Efectivo') {
-            finalTotal = roundCash(saleDetails.totalAmount);
-        }
-
-        const saleData = {
-            subtotal: saleDetails.subtotal,
-            discount: saleDetails.discount,
-            totalAmount: finalTotal,
-            paymentMethod: saleDetails.paymentMethod || null,
-            items: cart.map(item => ({
-                productId: item.id.toString().startsWith('qs-') ? null : item.id,
-                fullName: `${item.name}${item.subtype ? ` - ${item.subtype}` : ''}`,
-                quantity: item.quantity,
-                unitPrice: item.salePrices[0]?.price || 0,
-                purchasePrice: item.purchasePrice,
-            })),
-        };
-
         try {
             const response = await fetch(`${API_URL}/sales`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(saleData),
+                body: JSON.stringify({
+                    items: sale.items,
+                    subtotal: sale.subtotal,
+                    discount: sale.discount,
+                    totalAmount: sale.totalAmount,
+                    paymentMethod: sale.paymentMethod || 'Efectivo' // Usar efectivo por defecto si no se especifica
+                }),
             });
             if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.error || 'Falló al crear la venta pendiente');
+                const errorText = await response.json();
+                throw new Error(errorText.error || 'Falló al guardar la venta pendiente');
             }
-            set({ loading: false, cart: [], currentPaymentMethod: null });
+            const data = await response.json();
+            set({ pendingSale: null, loading: false });
             get().fetchAllSales();
-            return { success: true };
+            return { success: true, saleId: data.saleId };
         } catch (e) {
             set({ loading: false, error: e.message });
             return { success: false, error: e.message };
         }
     },
 
+    // --- Ventas Historial ---
+
     fetchAllSales: async () => {
         set({ loading: true, error: null });
         try {
             const response = await fetch(`${API_URL}/sales`);
-            if (!response.ok) throw new Error('No se pudieron obtener las ventas');
-            const json = await response.json();
-            const allSales = json.data.map(s => ({ ...s, items: JSON.parse(s.items) }));
-            set({
-                pendingSales: allSales.filter(s => s.status === 'pending'),
-                completedSales: allSales.filter(s => s.status === 'completed' || s.status === 'canceled'),
-                loading: false
-            });
+            if (!response.ok) throw new Error('Falló la carga del historial de ventas');
+            let data = await response.json();
+
+            // Parsear items y formatear fechas
+            const sales = data.data.map(sale => ({
+                ...sale,
+                items: JSON.parse(sale.items),
+            }));
+
+            set({ sales, loading: false });
         } catch (e) {
             set({ loading: false, error: e.message });
         }
@@ -129,16 +183,8 @@ const useSalesStore = create((set, get) => ({
     completeSale: async (saleId, saleData) => {
         set({ loading: true, error: null });
         try {
-            const { accounts } = useAccountStore.getState();
-            let accountId = null;
-
-            if (saleData.paymentMethod === 'Efectivo') {
-                const cashAccount = accounts.find(acc => acc.type === 'Efectivo');
-                accountId = cashAccount ? cashAccount.id : (accounts[0]?.id || null);
-            } else {
-                const digitalAccount = accounts.find(acc => acc.type === 'Digital');
-                accountId = digitalAccount ? digitalAccount.id : (accounts[0]?.id || null);
-            }
+            // Se usa el mapeo manual para asignar el accountId (CORRECCIÓN CLAVE)
+            const accountId = getAccountIdByPaymentMethod(saleData.paymentMethod);
 
             if (!accountId) {
                 throw new Error("No se encontró una cuenta apropiada para registrar la venta.");
@@ -147,15 +193,17 @@ const useSalesStore = create((set, get) => ({
             const response = await fetch(`${API_URL}/sales/${saleId}/complete`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ ...saleData, accountId }),
+                body: JSON.stringify({ ...saleData, accountId }), // Se envía el accountId al backend
             });
             if (!response.ok) {
                 const errorText = await response.json();
                 throw new Error(errorText.error || 'Falló al completar la venta');
             }
+            // Recargar datos tras completar la venta
             get().fetchAllSales();
             useProductStore.getState().fetchProducts();
-            useAccountStore.getState().fetchAccountSummary();
+            // Llama a la función que recarga todo el estado de la cuenta (resumen y movimientos)
+            useAccountStore.getState().fetchDataForCurrentState();
             return { success: true };
         } catch (e) {
             set({ loading: false, error: e.message });
@@ -172,8 +220,8 @@ const useSalesStore = create((set, get) => ({
                 body: JSON.stringify({ reason }),
             });
             if (!response.ok) {
-                const err = await response.json();
-                throw new Error(err.error || 'Falló al cancelar la venta.');
+                const errorText = await response.json();
+                throw new Error(errorText.error || 'Falló al cancelar la venta');
             }
             get().fetchAllSales();
             useProductStore.getState().fetchProducts();
@@ -185,7 +233,30 @@ const useSalesStore = create((set, get) => ({
         }
     },
 
-    updateCompletedSale: async (saleId, updatedData) => {
+    deleteSale: async (saleId, status) => {
+        set({ loading: true, error: null });
+        try {
+            const endpoint = status === 'pending' ? `/sales/pending/${saleId}` : `/sales/history/${saleId}`;
+            const response = await fetch(`${API_URL}${endpoint}`, {
+                method: 'DELETE',
+            });
+            if (!response.ok) {
+                const errorText = await response.json();
+                throw new Error(errorText.error || 'Falló al eliminar la venta');
+            }
+
+            if (status === 'pending') {
+                set({ pendingSale: null });
+            }
+            get().fetchAllSales();
+            return { success: true };
+        } catch (e) {
+            set({ loading: false, error: e.message });
+            return { success: false, error: e.message };
+        }
+    },
+
+    editSale: async (saleId, updatedData) => {
         set({ loading: true, error: null });
         try {
             const response = await fetch(`${API_URL}/sales/history/${saleId}`, {
@@ -194,8 +265,8 @@ const useSalesStore = create((set, get) => ({
                 body: JSON.stringify(updatedData),
             });
             if (!response.ok) {
-                const err = await response.json();
-                throw new Error(err.error || 'Falló al actualizar la venta.');
+                const errorText = await response.json();
+                throw new Error(errorText.error || 'Falló al editar la venta');
             }
             get().fetchAllSales();
             useAccountStore.getState().fetchDataForCurrentState();
@@ -206,34 +277,7 @@ const useSalesStore = create((set, get) => ({
         }
     },
 
-    deletePendingSale: async (saleId) => {
-        if (!window.confirm('¿Estás seguro de que quieres eliminar esta venta pendiente?')) return;
-        try {
-            const response = await fetch(`${API_URL}/sales/pending/${saleId}`, { method: 'DELETE' });
-            if (!response.ok) throw new Error('Falló al eliminar la venta');
-            set(state => ({
-                pendingSales: state.pendingSales.filter(s => s.id !== saleId)
-            }));
-        } catch (e) {
-            console.error("Error deleting pending sale:", e);
-            alert(e.message);
-        }
-    },
-
-    deleteCompletedSale: async (saleId) => {
-        if (!window.confirm('¿Estás seguro de que quieres eliminar esta venta del historial? Esta acción no se puede deshacer.')) return;
-        try {
-            const response = await fetch(`${API_URL}/sales/history/${saleId}`, { method: 'DELETE' });
-            if (!response.ok) throw new Error('Falló al eliminar la venta');
-            get().fetchAllSales();
-            useAccountStore.getState().fetchDataForCurrentState();
-        } catch (e) {
-            console.error("Error deleting completed sale:", e);
-            alert(e.message);
-        }
-    },
-
-    applyTax: async (saleId, taxPercentage) => {
+    applyTaxToSale: async (saleId, taxPercentage) => {
         set({ loading: true, error: null });
         try {
             const response = await fetch(`${API_URL}/sales/history/${saleId}/tax`, {
@@ -242,86 +286,14 @@ const useSalesStore = create((set, get) => ({
                 body: JSON.stringify({ taxPercentage }),
             });
             if (!response.ok) {
-                const err = await response.json();
-                throw new Error(err.error || 'Falló al aplicar el impuesto.');
+                const errorText = await response.json();
+                throw new Error(errorText.error || 'Falló al aplicar el impuesto');
             }
             get().fetchAllSales();
-            useAccountStore.getState().fetchDataForCurrentState();
             return { success: true };
         } catch (e) {
             set({ loading: false, error: e.message });
             return { success: false, error: e.message };
-        }
-    },
-
-    fetchSummary: async (startDate, endDate) => {
-        set({ loading: true, error: null });
-        try {
-            const response = await fetch(`${API_URL}/reports/monthly-summary?startDate=${startDate}&endDate=${endDate}`);
-            const json = await response.json();
-            if (!response.ok) throw new Error('No se pudo obtener el resumen');
-            set({ monthlySummary: { ...json.data, startDate, endDate }, loading: false });
-        } catch (e) {
-            set({ loading: false, error: e.message });
-        }
-    },
-
-    addExpense: async (expenseData) => {
-        try {
-            const response = await fetch(`${API_URL}/expenses`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(expenseData),
-            });
-            if (!response.ok) throw new Error('Falló al agregar el gasto');
-            const { startDate, endDate } = get().monthlySummary;
-            get().fetchSummary(startDate, endDate);
-            useAccountStore.getState().fetchDataForCurrentState();
-        } catch (e) {
-            console.error("Error adding expense:", e);
-            alert(e.message);
-        }
-    },
-
-    deleteExpense: async (expenseId) => {
-        try {
-            const response = await fetch(`${API_URL}/expenses/${expenseId}`, { method: 'DELETE' });
-            if (!response.ok) throw new Error('Falló al eliminar el gasto');
-            const { startDate, endDate } = get().monthlySummary;
-            get().fetchSummary(startDate, endDate);
-            useAccountStore.getState().fetchDataForCurrentState();
-        } catch (e) {
-            console.error("Error deleting expense:", e);
-            alert(e.message);
-        }
-    },
-
-    fetchPaymentMethods: async () => {
-        try {
-            const response = await fetch(`${API_URL}/payment-methods`);
-            const json = await response.json();
-            if (response.ok) set({ paymentMethods: json.data });
-        } catch (e) {
-            console.error("Error fetching payment methods:", e);
-        }
-    },
-
-    addPaymentMethod: async (name) => {
-        try {
-            const response = await fetch(`${API_URL}/payment-methods`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name }),
-            });
-            if (!response.ok) {
-                const err = await response.json();
-                throw new Error(err.error);
-            }
-            get().fetchPaymentMethods();
-            return { success: true };
-        } catch (e) {
-            alert(e.message);
-            return { success: false };
         }
     }
 }));

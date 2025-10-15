@@ -56,8 +56,9 @@ const CheckoutModal = ({ subtotal, preselectedPaymentMethod, onClose }) => {
                     <div className="border-t border-b py-2 mb-4 max-h-32 overflow-y-auto">
                         {cart.map(item => (
                             <div key={item.id} className="flex justify-between text-sm py-1">
-                                <span>{item.quantity}x {item.name} - {item.subtype}</span>
-                                <span>${formatNumber((item.salePrices[0]?.price || 0) * item.quantity)}</span>
+                                <span>{item.quantity}x {item.name}{item.subtype ? ` - ${item.subtype}` : ''}</span>
+                                {/* CORRECCIÓN: Usar encadenamiento opcional en el cálculo del precio */}
+                                <span>${formatNumber((item.salePrices?.[0]?.price || 0) * item.quantity)}</span>
                             </div>
                         ))}
                     </div>
